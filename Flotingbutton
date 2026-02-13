@@ -104,3 +104,24 @@ Click Save.
 
 The button should now appear floating on the right side of your Dashboard.
 
+
+
+To switch from a fixed floating button to a static one that sits inside the portlet, and to give it an "egg" shape, you need to update the CSS within the html string.
+
+Here is the updated code.
+
+Updated Code (Egg Shape, Inside Portlet)
+Replace the previous content variable in your script with this version:
+
+Key Changes Explained:
+Removed position: fixed: The container is now a standard flex box (display: flex) that sits inside the portlet boundaries. It will move when you scroll the page.
+
+Egg Shape (border-radius):
+
+I used border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;.
+
+This creates a classic vertical egg shape (slightly narrower at the top, wider at the bottom).
+
+If you want a horizontal egg (oval), swap the width/height values (e.g., width: 80px; height: 60px;) and use border-radius: 50%;.
+
+Flexbox Centering: Added display: flex; justify-content: center; to the .dashboard-fab-btn class to ensure the icon (i or span) stays perfectly in the middle of the egg.
