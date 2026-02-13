@@ -1,0 +1,106 @@
+You cannot use the "Applies To" field in a User Event Script to target the Dashboard/Home Page.
+
+User Event scripts only run on Records (like Sales Orders, Customers, etc.). They do not run on the Dashboard.
+
+To get this button on your Home Dashboard, you must create a Portlet Script.
+
+Step-by-Step Guide for the Dashboard (Portlet)
+You need to create a new script file specifically for the dashboard. The CSS will work the same way (using position: fixed), so the button will float over the entire dashboard even though the script lives inside a small portlet box.
+
+Step 1: Create the Portlet Script
+Save this as custom_dashboard_button.js.
+
+
+
+/**
+ * @NApiVersion 2.1
+ * @NScriptType Portlet
+ */
+define([], () => {
+
+    const render = (params) => {
+        const portlet = params.portlet;
+        
+        // Title is required for the portlet box, but the button will float outside it
+        portlet.title = 'Quick Actions';
+
+        // TARGET URL: Replace with your Suitelet or Record URL
+        const targetUrl = '/app/site/hosting/scriptlet.nl?script=customscript_my_suitelet&deploy=customdeploy_my_suitelet';
+
+        const content = `
+            <style>
+                /* Floating Container */
+                #dashboard-fab-container {
+                    position: fixed;
+                    top: 50%;
+                    right: 0;
+                    z-index: 99999; /* High z-index to sit on top of dashboard widgets */
+                    transform: translateY(-50%);
+                    cursor: pointer;
+                    transition: right 0.3s ease;
+                }
+                
+                /* Button Styling */
+                .dashboard-fab-btn {
+                    background-color: #2b3e50;
+                    color: white;
+                    padding: 15px 10px;
+                    border-radius: 8px 0 0 8px;
+                    box-shadow: -2px 2px 5px rgba(0,0,0,0.2);
+                    text-align: center;
+                    font-family: Arial, sans-serif;
+                    font-size: 20px;
+                }
+
+                .dashboard-fab-btn:hover {
+                    background-color: #1a2632;
+                    padding-right: 15px;
+                }
+            </style>
+
+            <div id="dashboard-fab-container" onclick="window.open('${targetUrl}', '_blank')">
+                <div class="dashboard-fab-btn">
+                    <span>&#8505;</span>
+                </div>
+            </div>
+        `;
+
+        portlet.html = content;
+    }
+
+    return { render }
+});
+
+
+Step 2: Create the Script Record
+Upload custom_dashboard_button.js to the File Cabinet.
+
+Go to Customization > Scripting > Scripts > New.
+
+Select the file and create the record.
+
+Important: NetSuite should automatically detect this as a Portlet type. If it asks, ensure you select Portlet.
+
+Name it "Dashboard Floating Button".
+
+Click Save and Deploy. (You don't need to set "Applies To" for Portlet scripts; just set the Status to Released).
+
+Step 3: Add it to your Dashboard
+This is the step that actually makes it appear.
+
+Go to your Home Dashboard.
+
+In the top right corner, click Personalize.
+
+Find the Custom Portlet icon (usually under the "Standard Content" or "Custom Portlet" tab) and drag it onto your dashboard.
+
+Tip: Place it at the bottom or in a small column so it doesn't take up much visual space (the button itself will float freely anyway).
+
+On the new Portlet box that appears, click the three dots (menu) in the corner and select Set Up.
+
+In the Source dropdown, select the script you created in Step 2 ("Dashboard Floating Button").
+
+Click Save.
+
+The button should now appear floating on the right side of your Dashboard.
+
