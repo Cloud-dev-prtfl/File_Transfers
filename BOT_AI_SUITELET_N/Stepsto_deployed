@@ -1,1 +1,33 @@
 
+How to Deploy and Use
+Save the Script: Save the code above as customscript_search_bot_sl.js.
+
+Upload to File Cabinet: Go to Documents > Files > SuiteScripts and upload the file.
+
+Create Script Record:
+
+Go to Customization > Scripting > Scripts > New.
+
+Select the file you uploaded.
+
+Name it "Search Generator Bot".
+
+Deploy the Script:
+
+Click Deploy Script.
+
+Set the Status to Testing or Released.
+
+Under the Links tab, create a link (e.g., to your Center tab) so you can easily access it.
+
+Run the Chatbot:
+
+Open the Suitelet URL.
+
+In the text box, type a request like:
+
+"Create a search for Sales Orders created last month that are in Pending Fulfillment status. Show me the Document Number, Date, and Customer Name."
+
+Click Generate Search.
+
+The bot will return a SuiteScript snippet using search.create({...}) that matches your criteria.
