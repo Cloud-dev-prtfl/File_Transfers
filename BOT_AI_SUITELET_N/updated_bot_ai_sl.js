@@ -7,7 +7,6 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log'], (serverWidget, ht
     const GEMINI_MODEL = 'gemini-2.0-flash';
 
     function onRequest(context) {
-        // Fetch the API Key from Script Parameter: custscript_gemini_api_key
         const scriptObj = runtime.getCurrentScript();
         const apiKey = scriptObj.getParameter({ name: 'custscript_gemini_api_key' });
 
@@ -19,21 +18,22 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log'], (serverWidget, ht
                 label: 'HTML' 
             });
 
-            // Using concatenation for the HTML string to avoid backtick issues in some NS editors
+            // Using string concatenation to prevent backtick/template literal syntax errors in NS editor
             let htmlContent = '<style>';
-            htmlContent += 'body { font-family: sans-serif; padding: 20px; background-color: #f8f9fa; }';
-            htmlContent += '#chat-box { border: 1px solid #dee2e6; height: 450px; overflow-y: auto; padding: 15px; margin-bottom: 15px; background: #fff; border-radius: 10px; }';
-            htmlContent += '.user-msg { color: #fff; background-color: #1a73e8; margin: 10px 0 10px auto; padding: 10px 15px; border-radius: 15px 15px 0 15px; max-width: 75%; clear: both; float: right; }';
-            htmlContent += '.ai-msg { color: #333; margin: 10px auto 10px 0; background: #f1f3f4; padding: 10px 15px; border-radius: 15px 15px 15px 0; max-width: 80%; clear: both; float: left; border: 1px solid #e8eaed; line-height: 1.5; white-space: pre-wrap; }';
-            htmlContent += '.loader { font-style: italic; color: #5f6368; margin: 10px 0; clear: both; }';
-            htmlContent += '.input-area { display: flex; gap: 10px; clear: both; }';
-            htmlContent += 'input { flex-grow: 1; padding: 12px; border: 1px solid #dadce0; border-radius: 24px; outline: none; }';
-            htmlContent += 'button { padding: 12px 25px; background: #1a73e8; color: white; border: none; border-radius: 24px; cursor: pointer; font-weight: bold; }';
+            htmlContent += 'body { font-family: "Segoe UI", Tahoma, sans-serif; background-color: #f0f2f5; padding: 20px; }';
+            htmlContent += '#chat-box { border: 1px solid #ced4da; height: 480px; overflow-y: auto; padding: 20px; margin-bottom: 15px; background: #ffffff; border-radius: 8px; display: flex; flex-direction: column; }';
+            htmlContent += '.user-msg { color: #ffffff; background-color: #007bff; align-self: flex-end; margin: 8px 0; padding: 12px 18px; border-radius: 18px 18px 2px 18px; max-width: 75%; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }';
+            htmlContent += '.ai-msg { color: #333333; align-self: flex-start; margin: 8px 0; background: #e9ecef; padding: 12px 18px; border-radius: 18px 18px 18px 2px; max-width: 85%; border: 1px solid #dee2e6; line-height: 1.6; white-space: pre-wrap; font-size: 14px; }';
+            htmlContent += '.loader { font-style: italic; color: #6c757d; margin: 10px 0; font-size: 13px; }';
+            htmlContent += '.input-area { display: flex; gap: 10px; }';
+            htmlContent += 'input { flex-grow: 1; padding: 14px; border: 1px solid #ced4da; border-radius: 30px; outline: none; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); }';
+            htmlContent += 'button { padding: 0 25px; background: #007bff; color: white; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; transition: background 0.2s; }';
+            htmlContent += 'button:hover { background: #0056b3; }';
             htmlContent += '</style>';
             
-            htmlContent += '<div id="chat-box"><div class="ai-msg">Hello! I am your NetSuite Assistant. How can I help you with your Saved Searches or Data today?</div></div>';
+            htmlContent += '<div id="chat-box"><div class="ai-msg">Hello! I am your NetSuite Search Expert. Describe the Saved Search you need, and I will write the SuiteScript 2.1 code for you.</div></div>';
             htmlContent += '<div class="input-area">';
-            htmlContent += '<input type="text" id="user-input" placeholder="Ask me anything..." onkeydown="if(event.key === \'Enter\') sendMessage()">';
+            htmlContent += '<input type="text" id="user-input" placeholder="e.g., Show me all high-priority cases from last week..." onkeydown="if(event.key === \'Enter\') sendMessage()">';
             htmlContent += '<button id="send-btn" onclick="sendMessage()">Send</button>';
             htmlContent += '</div>';
 
@@ -41,13 +41,18 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log'], (serverWidget, ht
             htmlContent += 'async function sendMessage() {';
             htmlContent += '  var input = document.getElementById("user-input");';
             htmlContent += '  var box = document.getElementById("chat-box");';
+            htmlContent += '  var btn = document.getElementById("send-btn");';
             htmlContent += '  var msg = input.value.trim();';
             htmlContent += '  if(!msg) return;';
-            htmlContent += '  box.innerHTML += \'<div class="user-msg">\' + msg + \'</div>\';';
+            
+            htmlContent += '  box.innerHTML += \'<div class="user-msg">\' + msg.replace(/</g, "&lt;") + \'</div>\';';
             htmlContent += '  input.value = "";';
+            htmlContent += '  input.disabled = true; btn.disabled = true;';
+            
             htmlContent += '  var loadId = "ld-" + Date.now();';
-            htmlContent += '  box.innerHTML += \'<div id="\' + loadId + \'" class="loader">Thinking...</div>\';';
+            htmlContent += '  box.innerHTML += \'<div id="\' + loadId + \'" class="loader">Gemini is thinking...</div>\';';
             htmlContent += '  box.scrollTop = box.scrollHeight;';
+            
             htmlContent += '  try {';
             htmlContent += '    const response = await fetch(window.location.href, {';
             htmlContent += '      method: "POST",';
@@ -56,9 +61,18 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log'], (serverWidget, ht
             htmlContent += '    });';
             htmlContent += '    const data = await response.json();';
             htmlContent += '    document.getElementById(loadId).remove();';
-            htmlContent += '    if(data.error) { box.innerHTML += \'<div class="ai-msg" style="color:red">Error: \' + data.error + \'</div>\'; }';
-            htmlContent += '    else { box.innerHTML += \'<div class="ai-msg">\' + data.answer + \'</div>\'; }';
-            htmlContent += '  } catch (e) { document.getElementById(loadId).innerText = "Error contacting Suitelet."; }';
+            
+            htmlContent += '    if(data.error) {';
+            htmlContent += '      box.innerHTML += \'<div class="ai-msg" style="background:#fff1f0; border-color:#ffa39e; color:#cf1322;"><b>Error:</b> \' + data.error + \'</div>\';';
+            htmlContent += '    } else {';
+            htmlContent += '      box.innerHTML += \'<div class="ai-msg">\' + data.answer + \'</div>\';';
+            htmlContent += '    }';
+            htmlContent += '  } catch (e) {';
+            htmlContent += '    document.getElementById(loadId).innerText = "Critical error communicating with Suitelet.";';
+            htmlContent += '  }';
+            
+            htmlContent += '  input.disabled = false; btn.disabled = false;';
+            htmlContent += '  input.focus();';
             htmlContent += '  box.scrollTop = box.scrollHeight;';
             htmlContent += '}';
             htmlContent += '</script>';
@@ -69,23 +83,28 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log'], (serverWidget, ht
         } else if (context.request.method === 'POST') {
             context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
             try {
-                if (!apiKey) throw new Error("API Key (custscript_gemini_api_key) is missing.");
+                if (!apiKey) throw new Error("API Key parameter (custscript_gemini_api_key) is not configured.");
 
                 const requestBody = JSON.parse(context.request.body);
                 const userPrompt = requestBody.prompt;
 
-                const systemPrompt = "You are a NetSuite expert. If the user asks for a search, provide SuiteScript 2.1 code using search.create. Keep explanations brief.";
+                const SYSTEM_PROMPT = "You are a NetSuite Developer. Your task is to provide SuiteScript 2.1 code using the N/search module. " +
+                                     "Provide the full code for search.create(). Do not explain common basics, just focus on the filters and columns. " +
+                                     "If the user asks for something not possible via Saved Search, explain why.";
                 
-                const aiResponse = callGeminiAPI(systemPrompt + "\n\nUser: " + userPrompt, apiKey);
+                const aiResponse = callGeminiAPI(SYSTEM_PROMPT + "\n\nUser Request: " + userPrompt, apiKey);
                 
                 context.response.write(JSON.stringify({ answer: aiResponse }));
             } catch (e) {
-                log.error('POST_ERROR', e.message);
+                log.error('POST_HANDLER_ERROR', e.message);
                 context.response.write(JSON.stringify({ error: e.message }));
             }
         }
     }
 
+    /**
+     * Internal function to call Google Gemini API
+     */
     function callGeminiAPI(promptText, key) {
         const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + key;
         
@@ -94,19 +113,24 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log'], (serverWidget, ht
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { temperature: 0.1 }
+                generationConfig: { 
+                    temperature: 0.1,
+                    maxOutputTokens: 2048
+                }
             })
         });
 
         if (response.code !== 200) {
-            throw new Error("Gemini API Fail: " + response.code);
+            log.error('GEMINI_HTTP_ERROR', 'Status: ' + response.code + ' Body: ' + response.body);
+            throw new Error("Gemini API Error (Status " + response.code + ")");
         }
 
         const resBody = JSON.parse(response.body);
         if (resBody.candidates && resBody.candidates[0].content) {
             return resBody.candidates[0].content.parts[0].text;
         }
-        return "No response from AI.";
+        
+        return "The AI was unable to generate a response. Please try a different prompt.";
     }
 
     return { onRequest: onRequest };
