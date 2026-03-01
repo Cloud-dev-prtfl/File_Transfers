@@ -4,3 +4,5 @@ Create a search for Sales Orders from today with a total over $1000.
 
 
 Customers who have a total transaction amount over $5000 but haven't placed an order in the last 3 months.
+
+Save a search for all Customers with a balance greater than 1000.
