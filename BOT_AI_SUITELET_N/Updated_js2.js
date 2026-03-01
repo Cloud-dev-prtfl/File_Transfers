@@ -4,6 +4,7 @@
  */
 define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url'], (serverWidget, https, runtime, log, search, url) => {
 
+    // Corrected Model Name (2.5 is not yet publicly available, reverted to 2.0 to prevent API errors)
     const GEMINI_MODEL = 'gemini-2.0-flash';
 
     function onRequest(context) {
@@ -12,7 +13,6 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
             const form = serverWidget.createForm({ title: 'NetSuite Search Auto-Creator' });
             const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
             
-            // Using the robust HTML/CSS structure from your provided logic
             htmlField.defaultValue = `
                 <style>
                     body { font-family: -apple-system, sans-serif; padding: 20px; background-color: #f8f9fa; }
@@ -91,8 +91,8 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
             try {
                 // Validate API Key
                 const scriptObj = runtime.getCurrentScript();
-                const rawApiKey = scriptObj.getParameter({ name: 'custscript_gemini_api_key' });
-                if (!rawApiKey) throw new Error("Missing API Key (custscript_gemini_api_key) in script parameters.");
+                const rawApiKey = scriptObj.getParameter({ name: 'custscript_open_ai_api_key' });
+                if (!rawApiKey) throw new Error("Missing API Key (custscript_open_ai_api_key) in script parameters.");
                 const apiKey = rawApiKey.trim();
 
                 const requestBody = (typeof context.request.body === 'object') ? context.request.body : JSON.parse(context.request.body);
@@ -108,7 +108,6 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
                 const aiResponseRaw = callGeminiAPI(systemPrompt + "\n\nUser Request: " + userPrompt, apiKey);
 
                 // 4. Clean and Parse JSON
-                // Robust cleaning similar to your SuiteQL logic
                 const cleanJson = aiResponseRaw.replace(/```json/g, "").replace(/```/g, "").replace(/JSON/g, "").trim();
                 
                 let searchConfig;
@@ -127,14 +126,10 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
                     throw new Error("NetSuite rejected the search criteria: " + searchErr.message);
                 }
 
-                // 6. Generate Link (FIXED: Using Relative URL)
-                // This resolves to something like "/app/common/search/savedsearch.nl?id=123"
-                // It avoids the "fully qualified URL" error because we don't use resolveDomain.
-                const relativePath = url.resolveRecord({
-                    recordType: 'savedsearch',
-                    recordId: searchId,
-                    isEditMode: false
-                });
+                // 6. Generate Link (FIXED: MANUAL STRING CONSTRUCTION)
+                // We use the standard NetSuite URL pattern for Search Results:
+                // /app/common/search/searchresults.nl?searchid={ID}
+                const relativePath = '/app/common/search/searchresults.nl?searchid=' + searchId;
 
                 const finalAnswer = "Success! I saved the search <b>" + searchConfig.title + "</b>.<br>" +
                                     "<a href='" + relativePath + "' target='_blank' class='search-link'>Click here to open it</a>";
