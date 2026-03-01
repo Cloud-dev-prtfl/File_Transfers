@@ -20,7 +20,7 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
             htmlContent += '.user-msg { background: #0070d2; color: #fff; align-self: flex-end; padding: 12px; border-radius: 12px 12px 2px 12px; margin: 5px; max-width: 80%; }';
             htmlContent += '.ai-msg { background: #f0f2f5; color: #333; align-self: flex-start; padding: 12px; border-radius: 12px 12px 12px 2px; margin: 5px; max-width: 85%; border: 1px solid #d8dde6; line-height: 1.5; }';
             htmlContent += '.loader { font-style: italic; color: #706e6b; margin: 5px; }';
-            htmlContent += '.search-link { display: inline-block; margin-top: 10px; color: #0070d2; font-weight: bold; text-decoration: underline; }';
+            htmlContent += '.search-link { display: inline-block; margin-top: 10px; color: #0070d2; font-weight: bold; text-decoration: underline; border: 1px solid #0070d2; padding: 5px 10px; border-radius: 4px; background: #fff; }';
             htmlContent += '</style>';
             
             htmlContent += '<div id="chat-box"><div class="ai-msg">Describe the search you want to save. I will create it directly in your account.</div></div>';
@@ -51,49 +51,44 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
         } else if (context.request.method === 'POST') {
             context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
             try {
-                if (!apiKey) throw new Error("API Key is missing.");
+                if (!apiKey) throw new Error("API Key parameter (custscript_gemini_api_key) is not configured.");
 
                 const requestBody = JSON.parse(context.request.body);
                 const userPrompt = requestBody.prompt;
 
-                // Stronger instruction to prevent Markdown formatting
-                const systemPrompt = "You are a NetSuite system helper. " +
-                                     "Convert the user request into a JSON object for search.create(). " +
-                                     "Use valid internal IDs for record type, filters, and columns. " +
-                                     "Return ONLY the raw JSON object. NO markdown, NO ```json blocks, NO text explanations. " +
+                const systemPrompt = "Convert user request into a JSON object for NetSuite search.create(). " +
+                                     "Return ONLY the raw JSON object. NO markdown, NO ```json blocks. " +
                                      "The title field must start with 'AI Generated: '.";
                 
                 let aiResponseRaw = callGeminiAPI(systemPrompt + "\n\nRequest: " + userPrompt, apiKey);
                 
-                // Aggressive cleaning of the response to ensure valid JSON
+                // Clean the response
                 let cleanJson = aiResponseRaw.replace(/```json/g, "").replace(/```/g, "").replace(/JSON/g, "").trim();
                 
-                let searchConfig;
-                try {
-                    searchConfig = JSON.parse(cleanJson);
-                } catch (parseError) {
-                    log.error('JSON Parse Failure', 'Raw: ' + aiResponseRaw);
-                    throw new Error("AI returned invalid formatting. Please try rephrasing.");
-                }
+                let searchConfig = JSON.parse(cleanJson);
 
-                // Execute the creation
+                // Execute creation
                 const newSearch = search.create(searchConfig);
                 const searchId = newSearch.save();
 
-                // Generate a link to the search for the user
-                const searchLink = url.resolveRecord({
+                // FIX: Generate a fully qualified URL
+                const domain = url.resolveDomain({
+                    hostType: url.HostType.APPLICATION
+                });
+                const relativePath = url.resolveRecord({
                     recordType: 'savedsearch',
                     recordId: searchId,
                     isEditMode: false
                 });
+                const fullUrl = 'https://' + domain + relativePath;
 
                 context.response.write(JSON.stringify({ 
                     answer: "Your saved search <b>" + searchConfig.title + "</b> is ready and saved.<br>" + 
-                            "<a href='" + searchLink + "' target='_blank' class='search-link'>Click here to view the results</a>"
+                            "<a href='" + fullUrl + "' target='_blank' class='search-link'>Click here to view results</a>"
                 }));
 
             } catch (e) {
-                log.error('AUTO_SAVE_ERROR', e.message);
+                log.error('POST_ERROR', e.message);
                 context.response.write(JSON.stringify({ error: e.message }));
             }
         }
@@ -109,9 +104,7 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
                 generationConfig: { temperature: 0.1 }
             })
         });
-
-        if (response.code !== 200) throw new Error("API Error: " + response.code);
-
+        if (response.code !== 200) throw new Error("Gemini API Error: " + response.code);
         const resBody = JSON.parse(response.body);
         return resBody.candidates[0].content.parts[0].text;
     }
