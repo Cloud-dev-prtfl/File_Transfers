@@ -4,7 +4,6 @@
  */
 define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url'], (serverWidget, https, runtime, log, search, url) => {
 
-    // Corrected Model Name (2.5 is not yet publicly available, reverted to 2.0 to prevent API errors)
     const GEMINI_MODEL = 'gemini-2.0-flash';
 
     function onRequest(context) {
@@ -91,7 +90,7 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
             try {
                 // Validate API Key
                 const scriptObj = runtime.getCurrentScript();
-                const rawApiKey = scriptObj.getParameter({ name: 'custscript_open_ai_api_key' });
+                const rawApiKey = scriptObj.getParameter({ name: 'custscript_open_ai_api_key' }); // Make sure this matches your script record!
                 if (!rawApiKey) throw new Error("Missing API Key (custscript_open_ai_api_key) in script parameters.");
                 const apiKey = rawApiKey.trim();
 
@@ -117,6 +116,14 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
                     throw new Error("AI returned invalid JSON. Raw response: " + cleanJson.substring(0, 50) + "...");
                 }
 
+                // ---------------------------------------------------------
+                // FIX: ENSURE UNIQUE NAME AND ID
+                // ---------------------------------------------------------
+                // We append a timestamp to the Title to make it unique every time.
+                const timestamp = new Date().getTime(); // e.g., 1709283400123
+                searchConfig.title = searchConfig.title + " (" + timestamp + ")";
+                searchConfig.id = 'customsearch_ai_' + timestamp; // Ensure the internal ID is also unique
+
                 // 5. Create and Save Search
                 let searchId;
                 try {
@@ -126,9 +133,8 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
                     throw new Error("NetSuite rejected the search criteria: " + searchErr.message);
                 }
 
-                // 6. Generate Link (FIXED: MANUAL STRING CONSTRUCTION)
-                // We use the standard NetSuite URL pattern for Search Results:
-                // /app/common/search/searchresults.nl?searchid={ID}
+                // 6. Generate Link (Manual Construction)
+                // Using standard URL pattern: /app/common/search/searchresults.nl?searchid={ID}
                 const relativePath = '/app/common/search/searchresults.nl?searchid=' + searchId;
 
                 const finalAnswer = "Success! I saved the search <b>" + searchConfig.title + "</b>.<br>" +
