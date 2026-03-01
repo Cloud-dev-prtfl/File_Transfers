@@ -155,7 +155,7 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
      * Robust Gemini API Caller
      */
     function callGeminiAPI(promptText, key) {
-        const baseUrl = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)";
+        const baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/";
         const endpoint = GEMINI_MODEL + ":generateContent?key=" + key;
         const fullUrl = baseUrl + endpoint;
 
