@@ -7,106 +7,185 @@ define(['N/ui/serverWidget', 'N/https', 'N/runtime', 'N/log', 'N/search', 'N/url
     const GEMINI_MODEL = 'gemini-2.0-flash';
 
     function onRequest(context) {
-        const scriptObj = runtime.getCurrentScript();
-        const apiKey = scriptObj.getParameter({ name: 'custscript_gemini_api_key' });
-
+        // 1. Setup UI (GET)
         if (context.request.method === 'GET') {
             const form = serverWidget.createForm({ title: 'NetSuite Search Auto-Creator' });
-            const htmlField = form.addField({ id: 'custpage_html', type: serverWidget.FieldType.INLINEHTML, label: 'HTML' });
-
-            let htmlContent = '<style>';
-            htmlContent += 'body { font-family: sans-serif; background-color: #f4f7f9; padding: 20px; }';
-            htmlContent += '#chat-box { border: 1px solid #d1d7dd; height: 400px; overflow-y: auto; padding: 15px; background: #fff; border-radius: 8px; margin-bottom: 10px; flex-direction: column; display: flex; }';
-            htmlContent += '.user-msg { background: #0070d2; color: #fff; align-self: flex-end; padding: 12px; border-radius: 12px 12px 2px 12px; margin: 5px; max-width: 80%; }';
-            htmlContent += '.ai-msg { background: #f0f2f5; color: #333; align-self: flex-start; padding: 12px; border-radius: 12px 12px 12px 2px; margin: 5px; max-width: 85%; border: 1px solid #d8dde6; line-height: 1.5; }';
-            htmlContent += '.loader { font-style: italic; color: #706e6b; margin: 5px; }';
-            htmlContent += '.search-link { display: inline-block; margin-top: 10px; color: #0070d2; font-weight: bold; text-decoration: underline; border: 1px solid #0070d2; padding: 5px 10px; border-radius: 4px; background: #fff; }';
-            htmlContent += '</style>';
+            const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
             
-            htmlContent += '<div id="chat-box"><div class="ai-msg">Describe the search you want to save. I will create it directly in your account.</div></div>';
-            htmlContent += '<div style="display:flex; gap:10px;"><input type="text" id="user-input" style="flex-grow:1; padding:12px; border-radius:4px; border:1px solid #ccc;" placeholder="e.g. Create a search for all Customers in New York...">';
-            htmlContent += '<button onclick="sendMessage()" id="send-btn" style="padding:10px 20px; background:#0070d2; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Create & Save</button></div>';
+            // Using the robust HTML/CSS structure from your provided logic
+            htmlField.defaultValue = `
+                <style>
+                    body { font-family: -apple-system, sans-serif; padding: 20px; background-color: #f8f9fa; }
+                    #chat-box { border: 1px solid #dee2e6; height: 450px; overflow-y: auto; padding: 15px; margin-bottom: 15px; background: #fff; border-radius: 10px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1); }
+                    .user-msg { color: #fff; background-color: #1a73e8; margin: 10px 0 10px auto; padding: 10px 15px; border-radius: 15px 15px 0 15px; max-width: 75%; width: fit-content; clear: both; float: right; }
+                    .ai-msg { color: #333; margin: 10px auto 10px 0; background: #f1f3f4; padding: 10px 15px; border-radius: 15px 15px 15px 0; max-width: 80%; width: fit-content; clear: both; float: left; border: 1px solid #e8eaed; line-height: 1.5; }
+                    .error-msg { color: #d93025; background-color: #feefee; border: 1px solid #fad2cf; padding: 12px; border-radius: 8px; margin: 10px 0; clear: both; font-family: monospace; font-size: 12px; }
+                    .loader { font-style: italic; color: #5f6368; margin: 10px 0; clear: both; }
+                    .input-area { display: flex; gap: 10px; clear: both; }
+                    input[type="text"] { flex-grow: 1; padding: 12px; border: 1px solid #dadce0; border-radius: 24px; outline: none; padding-left: 20px; }
+                    button { padding: 12px 25px; cursor: pointer; background: #1a73e8; color: white; border: none; border-radius: 24px; font-weight: bold; transition: background 0.2s; }
+                    button:hover { background: #1557b0; }
+                    .search-link { display: inline-block; margin-top: 5px; color: #1a73e8; text-decoration: underline; font-weight: 600; }
+                </style>
+                <div id="chat-box">
+                    <div class="ai-msg">I can create and save searches for you. Example: "Save a search for all Customers in California."</div>
+                </div>
+                <div class="input-area">
+                    <input type="text" id="user-input" placeholder="Describe the search to save..." onkeydown="if(event.key === 'Enter') sendMessage()">
+                    <button id="send-btn" onclick="sendMessage()">Create & Save</button>
+                </div>
+                <script>
+                    async function sendMessage() {
+                        var input = document.getElementById('user-input');
+                        var box = document.getElementById('chat-box');
+                        var btn = document.getElementById('send-btn');
+                        var msg = input.value.trim();
+                        if(!msg) return;
 
-            htmlContent += '<script>';
-            htmlContent += 'async function sendMessage() {';
-            htmlContent += '  var input = document.getElementById("user-input"); var box = document.getElementById("chat-box"); var btn = document.getElementById("send-btn");';
-            htmlContent += '  var msg = input.value.trim(); if(!msg) return;';
-            htmlContent += '  box.innerHTML += \'<div class="user-msg">\' + msg + \'</div>\'; input.value = ""; input.disabled = true; btn.disabled = true;';
-            htmlContent += '  var lid = "l-"+Date.now(); box.innerHTML += \'<div id="\' + lid + \'" class="loader">Generating and Saving Search...</div>\';';
-            htmlContent += '  box.scrollTop = box.scrollHeight;';
-            htmlContent += '  try {';
-            htmlContent += '    const res = await fetch(window.location.href, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({prompt: msg}) });';
-            htmlContent += '    const data = await res.json();';
-            htmlContent += '    document.getElementById(lid).remove();';
-            htmlContent += '    if(data.error) { box.innerHTML += \'<div class="ai-msg" style="color:red"><b>Error:</b> \' + data.error + \'</div>\'; }';
-            htmlContent += '    else { box.innerHTML += \'<div class="ai-msg">\' + data.answer + \'</div>\'; }';
-            htmlContent += '  } catch(e) { document.getElementById(lid).innerText = "Communication error."; }';
-            htmlContent += '  input.disabled = false; btn.disabled = false; box.scrollTop = box.scrollHeight; input.focus();';
-            htmlContent += '}';
-            htmlContent += '</script>';
+                        box.innerHTML += '<div class="user-msg">' + msg.replace(/</g, "&lt;") + '</div>';
+                        input.value = '';
+                        input.disabled = true; btn.disabled = true;
+                        
+                        var loadingId = 'loading-' + Date.now();
+                        box.innerHTML += '<div id="' + loadingId + '" class="loader">Gemini is configuring NetSuite...</div>';
+                        box.scrollTop = box.scrollHeight;
 
-            htmlField.defaultValue = htmlContent;
+                        try {
+                            const response = await fetch(window.location.href, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ prompt: msg })
+                            });
+                            
+                            const textResponse = await response.text();
+                            let data;
+                            try {
+                                data = JSON.parse(textResponse);
+                            } catch(e) {
+                                throw new Error("Server returned invalid JSON.");
+                            }
+
+                            document.getElementById(loadingId).remove();
+                            if (data.error) {
+                                box.innerHTML += '<div class="error-msg"><b>Error:</b> ' + data.error + '</div>';
+                            } else {
+                                box.innerHTML += '<div class="ai-msg">' + data.answer + '</div>';
+                            }
+                        } catch (e) {
+                            if(document.getElementById(loadingId)) document.getElementById(loadingId).remove();
+                            box.innerHTML += '<div class="error-msg"><b>Connection Error:</b> ' + e.message + '</div>';
+                        }
+                        input.disabled = false; btn.disabled = false;
+                        input.focus();
+                        box.scrollTop = box.scrollHeight;
+                    }
+                </script>
+            `;
             context.response.writePage(form);
-
-        } else if (context.request.method === 'POST') {
+        }
+        
+        // 2. Handle Logic (POST)
+        else if (context.request.method === 'POST') {
             context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
+            
             try {
-                if (!apiKey) throw new Error("API Key parameter (custscript_gemini_api_key) is not configured.");
+                // Validate API Key
+                const scriptObj = runtime.getCurrentScript();
+                const rawApiKey = scriptObj.getParameter({ name: 'custscript_gemini_api_key' });
+                if (!rawApiKey) throw new Error("Missing API Key (custscript_gemini_api_key) in script parameters.");
+                const apiKey = rawApiKey.trim();
 
-                const requestBody = JSON.parse(context.request.body);
+                const requestBody = (typeof context.request.body === 'object') ? context.request.body : JSON.parse(context.request.body);
                 const userPrompt = requestBody.prompt;
 
-                const systemPrompt = "Convert user request into a JSON object for NetSuite search.create(). " +
-                                     "Return ONLY the raw JSON object. NO markdown, NO ```json blocks. " +
-                                     "The title field must start with 'AI Generated: '.";
+                // 3. AI Prompt Construction
+                const systemPrompt = "You are a NetSuite system helper. " +
+                                     "Convert the user request into a JSON object for 'search.create()'. " +
+                                     "Include 'type', 'filters', 'columns', and a 'title'. " +
+                                     "The 'title' must start with 'AI Generated: '. " +
+                                     "Return ONLY the raw JSON object. NO markdown (no ```json).";
                 
-                let aiResponseRaw = callGeminiAPI(systemPrompt + "\n\nRequest: " + userPrompt, apiKey);
-                
-                // Clean the response
-                let cleanJson = aiResponseRaw.replace(/```json/g, "").replace(/```/g, "").replace(/JSON/g, "").trim();
-                
-                let searchConfig = JSON.parse(cleanJson);
+                const aiResponseRaw = callGeminiAPI(systemPrompt + "\n\nUser Request: " + userPrompt, apiKey);
 
-                // Execute creation
-                const newSearch = search.create(searchConfig);
-                const searchId = newSearch.save();
+                // 4. Clean and Parse JSON
+                // Robust cleaning similar to your SuiteQL logic
+                const cleanJson = aiResponseRaw.replace(/```json/g, "").replace(/```/g, "").replace(/JSON/g, "").trim();
+                
+                let searchConfig;
+                try {
+                    searchConfig = JSON.parse(cleanJson);
+                } catch (jsonErr) {
+                    throw new Error("AI returned invalid JSON. Raw response: " + cleanJson.substring(0, 50) + "...");
+                }
 
-                // FIX: Generate a fully qualified URL
-                const domain = url.resolveDomain({
-                    hostType: url.HostType.APPLICATION
-                });
+                // 5. Create and Save Search
+                let searchId;
+                try {
+                    const newSearch = search.create(searchConfig);
+                    searchId = newSearch.save();
+                } catch (searchErr) {
+                    throw new Error("NetSuite rejected the search criteria: " + searchErr.message);
+                }
+
+                // 6. Generate Link (FIXED: Using Relative URL)
+                // This resolves to something like "/app/common/search/savedsearch.nl?id=123"
+                // It avoids the "fully qualified URL" error because we don't use resolveDomain.
                 const relativePath = url.resolveRecord({
                     recordType: 'savedsearch',
                     recordId: searchId,
                     isEditMode: false
                 });
-                const fullUrl = 'https://' + domain + relativePath;
+
+                const finalAnswer = "Success! I saved the search <b>" + searchConfig.title + "</b>.<br>" +
+                                    "<a href='" + relativePath + "' target='_blank' class='search-link'>Click here to open it</a>";
 
                 context.response.write(JSON.stringify({ 
-                    answer: "Your saved search <b>" + searchConfig.title + "</b> is ready and saved.<br>" + 
-                            "<a href='" + fullUrl + "' target='_blank' class='search-link'>Click here to view results</a>"
+                    answer: finalAnswer, 
+                    id: searchId 
                 }));
 
             } catch (e) {
-                log.error('POST_ERROR', e.message);
+                log.error('POST Process Error', e.message);
                 context.response.write(JSON.stringify({ error: e.message }));
             }
         }
     }
 
+    /**
+     * Robust Gemini API Caller
+     */
     function callGeminiAPI(promptText, key) {
-        const endpoint = '[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)' + GEMINI_MODEL + ':generateContent?key=' + key;
+        const baseUrl = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)";
+        const endpoint = GEMINI_MODEL + ":generateContent?key=" + key;
+        const fullUrl = baseUrl + endpoint;
+
         const response = https.post({
-            url: endpoint,
+            url: fullUrl,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{ parts: [{ text: promptText }] }],
                 generationConfig: { temperature: 0.1 }
             })
         });
-        if (response.code !== 200) throw new Error("Gemini API Error: " + response.code);
-        const resBody = JSON.parse(response.body);
-        return resBody.candidates[0].content.parts[0].text;
+
+        if (response.code !== 200) {
+            log.error('Gemini API Fail', 'Status: ' + response.code + ' Body: ' + response.body);
+            throw new Error("Gemini API Error (" + response.code + ")");
+        }
+
+        let resBody;
+        try {
+            resBody = JSON.parse(response.body.trim());
+        } catch (parseErr) {
+            log.error('JSON Parse Error', 'Body: ' + response.body);
+            throw new Error("Could not parse AI response.");
+        }
+
+        if (resBody.candidates && resBody.candidates[0].content) {
+            return resBody.candidates[0].content.parts[0].text;
+        } else {
+            throw new Error("AI returned empty result.");
+        }
     }
 
     return { onRequest: onRequest };
