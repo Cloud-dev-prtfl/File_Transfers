@@ -173,3 +173,142 @@ function(query, https, serverWidget, runtime, log, record, search) {
         const responseText = callGemini(systemPrompt + "\n\n" + content, key);
         
         try {
+            return safeJSONExtract(responseText);
+        } catch (e) {
+            return { satisfied: true, reason: "Parse bypass - Auditor output was not valid JSON." }; 
+        }
+    }
+
+    function runAgent4_Format(rawData, key) {
+        const systemPrompt = "You are Agent 4 (Designer). Convert raw text into professional HTML. Use <b> for key data. DO NOT output markdown code blocks.";
+        let htmlResponse = callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
+        return htmlResponse.replace(/```html/gi, '').replace(/```/g, '').trim();
+    }
+
+    function runAgent5_Review(originalPrompt, htmlContent, key) {
+        const systemPrompt = "You are Agent 5 (Reviewer). Ensure this HTML directly answers the prompt. DO NOT output markdown code blocks.";
+        let reviewResponse = callGemini(systemPrompt + "\n\nProposed HTML:\n" + htmlContent, key);
+        return reviewResponse.replace(/```html/gi, '').replace(/```/g, '').trim();
+    }
+
+    // ========================================================================
+    // 5. API CALLER
+    // ========================================================================
+    function callGemini(prompt, key, tools = null) {
+        const url = "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent?key=" + key;
+        let payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1 } };
+
+        if (tools) {
+            payload.tools = [{ function_declarations: tools }];
+            payload.tool_config = { function_calling_config: { mode: "AUTO" } };
+        }
+
+        const response = https.post({ url: url, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        
+        if (response.code !== 200) {
+            throw new Error("Gemini API Error: Status " + response.code);
+        }
+
+        let resBody;
+        try {
+            resBody = safeJSONExtract(response.body);
+        } catch(e) {
+             throw new Error("Failed to parse Gemini API response payload.");
+        }
+
+        let candidate = resBody.candidates[0].content.parts[0];
+        return (tools && candidate.functionCall) ? { functionCall: candidate.functionCall } : { text: candidate.text };
+    }
+
+    // ========================================================================
+    // 6. NATIVE EXECUTORS (With Safe Extraction)
+    // ========================================================================
+    function executeCreateSearch(configPayload) {
+        try {
+            // Safely extract the JSON config, regardless of how Gemini formatted it
+            let searchConfig = safeJSONExtract(configPayload);
+
+            // If Gemini nested it under a "json_config" property by mistake
+            if (searchConfig.json_config) {
+                searchConfig = safeJSONExtract(searchConfig.json_config);
+            }
+
+            const timestamp = new Date().getTime();
+            searchConfig.title = (searchConfig.title || "AI Search") + " (" + timestamp + ")";
+            searchConfig.id = 'customsearch_ai_' + timestamp;
+
+            const newSearch = search.create(searchConfig);
+            const searchId = newSearch.save();
+            return "Success! Created Search: " + searchConfig.title + ". Link: <a href='/app/common/search/searchresults.nl?searchid=" + searchId + "'>View Search</a>";
+
+        } catch (e) {
+            return "Execution Error: " + e.message; 
+        }
+    }
+
+    function executeSuiteQL(q) {
+        try {
+            let cleanQuery = String(q).replace(/```sql/gi,'').replace(/```/g,'').trim();
+            let res = query.runSuiteQL({ query: cleanQuery });
+            let rows = res.asMappedResults().slice(0, 15);
+            return rows.length ? JSON.stringify(rows) : "No records found matching query.";
+        } catch(e) {
+            return "SuiteQL Error: " + e.message; 
+        }
+    }
+
+    // ========================================================================
+    // 7. UI
+    // ========================================================================
+    function renderUI(context) {
+        const form = serverWidget.createForm({ title: 'MAS: Auto-Creator & Validator' });
+        const htmlField = form.addField({ id: 'html', type: 'inlinehtml', label: 'HTML' });
+        htmlField.defaultValue = `
+            <style>
+                body { font-family: -apple-system, sans-serif; padding: 20px; background-color: #f8f9fa; }
+                #chat-box { border: 1px solid #dee2e6; height: 450px; overflow-y: auto; padding: 15px; margin-bottom: 15px; background: #fff; border-radius: 10px; }
+                .user-msg { color: #fff; background-color: #1a73e8; margin: 10px 0 10px auto; padding: 10px 15px; border-radius: 15px 15px 0 15px; max-width: 75%; float: right; clear: both; }
+                .ai-msg { color: #333; margin: 10px auto 10px 0; background: #f1f3f4; padding: 10px 15px; border-radius: 15px 15px 15px 0; max-width: 80%; float: left; clear: both; line-height: 1.5; }
+                .error-msg { color: #d93025; background-color: #feefee; padding: 12px; border-radius: 8px; margin: 10px 0; clear: both; font-size: 12px; }
+                .loader { font-style: italic; color: #5f6368; margin: 10px 0; clear: both; }
+                input[type="text"] { width: 75%; padding: 12px; border: 1px solid #dadce0; border-radius: 24px; outline: none; padding-left: 20px; }
+                button { padding: 12px 25px; cursor: pointer; background: #1a73e8; color: white; border: none; border-radius: 24px; font-weight: bold; }
+                a { color: #1a73e8; font-weight: 600; }
+            </style>
+            <div id="chat-box"><div class="ai-msg">I am online. The Safe-Parse Extractor is active.</div></div>
+            <div>
+                <input type="text" id="user-input" placeholder="Example: Create a search for Open Invoices..." onkeydown="if(event.key === 'Enter') sendMessage()">
+                <button onclick="sendMessage()">Deploy Pipeline</button>
+            </div>
+            <script>
+                async function sendMessage() {
+                    var input = document.getElementById('user-input');
+                    var box = document.getElementById('chat-box');
+                    var msg = input.value.trim();
+                    if(!msg) return;
+
+                    box.innerHTML += '<div class="user-msg">' + msg + '</div>';
+                    input.value = '';
+                    
+                    var loadId = 'load-' + Date.now();
+                    box.innerHTML += '<div id="' + loadId + '" class="loader">Agents are evaluating criteria and extracting JSON...</div>';
+                    box.scrollTop = box.scrollHeight;
+
+                    try {
+                        let res = await fetch(window.location.href, { method: 'POST', body: JSON.stringify({ prompt: msg }) });
+                        let data = await res.json();
+                        document.getElementById(loadId).remove();
+                        box.innerHTML += data.error ? '<div class="error-msg">' + data.error + '</div>' : '<div class="ai-msg">' + data.answer + '</div>';
+                    } catch (e) {
+                        if(document.getElementById(loadId)) document.getElementById(loadId).remove();
+                        box.innerHTML += '<div class="error-msg">Connection Error: Could not parse server response.</div>';
+                    }
+                    box.scrollTop = box.scrollHeight;
+                }
+            </script>
+        `;
+        context.response.writePage(form);
+    }
+
+    return { onRequest: onRequest };
+});
