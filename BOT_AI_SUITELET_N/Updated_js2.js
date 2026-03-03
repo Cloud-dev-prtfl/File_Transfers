@@ -1,7 +1,7 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Native N/llm
+ * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Native N/llm (Strict Formatting)
  */
 define(['N/query', 'N/llm', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
 function(query, llm, serverWidget, runtime, log, record, search) {
@@ -127,14 +127,13 @@ function(query, llm, serverWidget, runtime, log, record, search) {
     function runAgent3_Audit(originalPrompt, resultData) {
         const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
                              "Check for errors or if the tool failed. \n" +
-                             "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }. No markdown formatting.";
+                             "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }. No markdown formatting, no conversational text.";
         
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
         const responseText = callNetSuiteLLM(systemPrompt + "\n\n" + content);
         
         try {
-            let cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-            return JSON.parse(cleanJson);
+            return JSON.parse(extractJSON(responseText));
         } catch (e) {
             log.error('Agent 3 JSON Parse Fail', responseText);
             return { satisfied: true, reason: "Auditor parse failure, bypassing." }; 
@@ -143,27 +142,31 @@ function(query, llm, serverWidget, runtime, log, record, search) {
 
     function runAgent4_Format(rawData) {
         const systemPrompt = "You are Agent 4 (Designer). Convert this raw execution text into professional HTML. \n" +
-                             "If the raw data contains a success message and a NetSuite relative link (e.g., /app/common/search...), YOU MUST create an active HTML <a> tag for it. \n" +
-                             "Use <b> for key data. Do not alter core values.";
-        return callNetSuiteLLM(systemPrompt + "\n\nRaw Data: " + rawData);
+                             "If the raw data contains a success message and a NetSuite relative link, YOU MUST create an active HTML <a> tag for it. \n" +
+                             "Use <b> for key data. Do not alter core values.\n" +
+                             "CRITICAL: Output ONLY the raw HTML code. Do NOT include markdown blocks like ```html. Do NOT include any conversational text explaining the HTML.";
+        
+        let rawHtml = callNetSuiteLLM(systemPrompt + "\n\nRaw Data: " + rawData);
+        return cleanMarkdown(rawHtml);
     }
 
     function runAgent5_Review(originalPrompt, htmlContent) {
         const systemPrompt = "You are Agent 5 (Reviewer). Review this HTML response. \n" +
                              "If it correctly addresses the prompt and contains valid HTML, return the HTML exactly as is. \n" +
-                             "If it is broken or harmful, return a simple polite error message.";
-        return callNetSuiteLLM(systemPrompt + "\n\nProposed HTML:\n" + htmlContent);
+                             "If it is broken or harmful, return a simple polite error message.\n" +
+                             "CRITICAL: Output ONLY the final HTML or error message. Do NOT add conversational text like 'The proposed HTML is valid'. Do NOT use markdown blocks like ```html.";
+        
+        let reviewedHtml = callNetSuiteLLM(systemPrompt + "\n\nProposed HTML:\n" + htmlContent);
+        return cleanMarkdown(reviewedHtml);
     }
 
     // ========================================================================
-    // 4. ROBUST API CALLER (Native N/llm Integration)
+    // 4. ROBUST API CALLER & STRING PARSERS
     // ========================================================================
 
     function callNetSuiteLLM(prompt, tools = null) {
         let finalPrompt = prompt;
 
-        // Since N/llm relies on standard OCI models without a direct 'tools' config payload,
-        // we heavily instruct it via the prompt to respond in the structured JSON the pipeline expects.
         if (tools) {
             finalPrompt += "\n\nAVAILABLE TOOLS:\n" + JSON.stringify(tools, null, 2) + 
                            "\n\nINSTRUCTIONS FOR TOOLS:\n" +
@@ -172,16 +175,12 @@ function(query, llm, serverWidget, runtime, log, record, search) {
                            "Do NOT include any other text, explanation, or markdown formatting outside the JSON.";
         }
 
-        const response = llm.generateText({
-            prompt: finalPrompt
-        });
-
+        const response = llm.generateText({ prompt: finalPrompt });
         const outputText = response.text;
 
         if (tools) {
             try {
-                let cleanJson = outputText.replace(/```json/g, "").replace(/```/g, "").trim();
-                let parsed = JSON.parse(cleanJson);
+                let parsed = JSON.parse(extractJSON(outputText));
                 if (parsed.functionCall) {
                     return { functionCall: parsed.functionCall };
                 }
@@ -194,15 +193,40 @@ function(query, llm, serverWidget, runtime, log, record, search) {
         return outputText;
     }
 
+    // Helper: Aggressively extracts a JSON object from a chatty string
+    function extractJSON(text) {
+        let cleanText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+        let jsonStart = cleanText.indexOf('{');
+        let jsonEnd = cleanText.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+            return cleanText.substring(jsonStart, jsonEnd + 1);
+        }
+        return cleanText;
+    }
+
+    // Helper: Aggressively removes HTML markdown wrappers
+    function cleanMarkdown(text) {
+        return text.replace(/```html/gi, "").replace(/```/g, "").trim();
+    }
+
     // ========================================================================
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
     function executeCreateSearch(jsonConfigString) {
+        let searchConfig;
+        
+        // 1. Attempt to parse the JSON provided by Agent 2
         try {
-            let cleanConfig = jsonConfigString.replace(/```json/g, "").replace(/```/g, "").trim();
-            let searchConfig = JSON.parse(cleanConfig);
+            let extracted = extractJSON(jsonConfigString);
+            searchConfig = JSON.parse(extracted);
+        } catch (e) {
+            log.error('Execution Error: JSON Parse', "Failed to parse: " + jsonConfigString);
+            return "Execution Error: AI provided invalid JSON format for the search criteria.";
+        }
 
+        // 2. Attempt to create the search in NetSuite
+        try {
             const timestamp = new Date().getTime();
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
             searchConfig.id = 'customsearch_ai_' + timestamp;
@@ -220,14 +244,15 @@ function(query, llm, serverWidget, runtime, log, record, search) {
             });
 
         } catch (e) {
-            log.error('Search Creation Error', e.message);
-            throw new Error("NetSuite rejected the search criteria: " + e.message);
+            // If NetSuite rejects it, log the exact payload to debug hallucinated fields
+            log.error('Search Creation Rejected', e.message + " | Payload: " + JSON.stringify(searchConfig));
+            return "Execution Error: NetSuite rejected the search criteria. This is usually due to the AI guessing an incorrect field name or filter operator. Details: " + e.message;
         }
     }
 
     function executeSuiteQL(q) {
         try {
-            let cleanQuery = q.replace(/```sql/g,'').replace(/```/g,'').trim();
+            let cleanQuery = q.replace(/```sql/gi,'').replace(/```/g,'').trim();
             let res = query.runSuiteQL({ query: cleanQuery });
             let rows = res.asMappedResults().slice(0, 50);
             return rows.length ? JSON.stringify(rows) : "No records found.";
