@@ -1,17 +1,26 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Native N/llm (Strict Formatting)
+ * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Schema Validation & ReAct Loop
  */
 define(['N/query', 'N/llm', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
 function(query, llm, serverWidget, runtime, log, record, search) {
-
-    const MAX_RETRIES = 1;
 
     // ========================================================================
     // 1. TOOL DEFINITIONS (Available to Agent 2)
     // ========================================================================
     const TOOLS_SCHEMA = [
+        {
+            name: "get_record_fields",
+            description: "Fetches valid NetSuite internal field IDs for a given record type. ALWAYS use this FIRST to validate field names before creating a saved search.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record (e.g., 'customer', 'transaction', 'creditmemo')." }
+                },
+                required: ["record_type"]
+            }
+        },
         {
             name: "create_saved_search",
             description: "Creates a NetSuite Saved Search. Used when the user asks to save, build, or create a search.",
@@ -57,8 +66,8 @@ function(query, llm, serverWidget, runtime, log, record, search) {
                 log.debug('Pipeline', 'Starting Agent 1 (Analysis)...');
                 let analysis = runAgent1_Analysis(userPrompt);
                 
-                // 2. Agent 2: Execution (The "Main" Agent)
-                log.debug('Pipeline', 'Starting Agent 2 (Execution)...');
+                // 2. Agent 2: Execution (The "Main" Agent with Loop)
+                log.debug('Pipeline', 'Starting Agent 2 (Execution with Schema Check)...');
                 let executionResult = runAgent2_Execution(analysis);
                 
                 // 3. Agent 3: Accuracy Check (The "Auditor")
@@ -104,24 +113,47 @@ function(query, llm, serverWidget, runtime, log, record, search) {
     }
 
     function runAgent2_Execution(planFromAgent1) {
-        const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan. \n" +
-                             "If creating a search, format the 'json_config' parameter as a strict, valid JSON string compatible with NetSuite search.create(). \n" +
-                             "Plan to execute:\n" + planFromAgent1;
+        let conversationHistory = "Plan to execute:\n" + planFromAgent1;
+        const maxSteps = 3; // Allow the agent up to 3 turns to fetch schema, then create search
         
-        const decision = callNetSuiteLLM(systemPrompt, TOOLS_SCHEMA);
-        
-        if (decision.functionCall) {
-            const fn = decision.functionCall;
-            try {
-                if (fn.name === 'create_saved_search') return executeCreateSearch(fn.args.json_config);
-                if (fn.name === 'run_suiteql') return executeSuiteQL(fn.args.query);
-                return "Error: Unknown Tool " + fn.name;
-            } catch (e) {
-                return "Execution Error: " + e.message;
+        for (let i = 0; i < maxSteps; i++) {
+            const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan. \n" +
+                                 "CRITICAL RULE: If you are asked to create a saved search, you MUST use 'get_record_fields' first to fetch the valid internal IDs for the record you are querying. Do not guess field names. \n" +
+                                 "Once you have the valid fields, call 'create_saved_search'. \n" +
+                                 "Current Context:\n" + conversationHistory;
+            
+            const decision = callNetSuiteLLM(systemPrompt, TOOLS_SCHEMA);
+            
+            if (decision.functionCall) {
+                const fn = decision.functionCall;
+                let toolResult = "";
+                
+                try {
+                    if (fn.name === 'get_record_fields') {
+                        toolResult = executeGetRecordSchema(fn.args.record_type);
+                        // Append to history and continue loop so LLM can read schema
+                        conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
+                        log.debug('Agent 2 Loop', 'Fetched schema for ' + fn.args.record_type);
+                    } 
+                    else if (fn.name === 'create_saved_search') {
+                        return executeCreateSearch(fn.args.json_config); // End execution
+                    } 
+                    else if (fn.name === 'run_suiteql') {
+                        return executeSuiteQL(fn.args.query); // End execution
+                    } 
+                    else {
+                        return "Error: Unknown Tool " + fn.name;
+                    }
+                } catch (e) {
+                    return "Execution Error during " + fn.name + ": " + e.message;
+                }
+            } else {
+                // LLM decided to return standard text instead of a tool
+                return decision.text || "Agent 2 determined no action was required.";
             }
-        } else {
-            return decision.text || "Agent 2 determined no action was required.";
         }
+        
+        return "Execution Error: Agent 2 hit maximum loop steps (" + maxSteps + ") without completing the task. Context: " + conversationHistory;
     }
 
     function runAgent3_Audit(originalPrompt, resultData) {
@@ -193,7 +225,6 @@ function(query, llm, serverWidget, runtime, log, record, search) {
         return outputText;
     }
 
-    // Helper: Aggressively extracts a JSON object from a chatty string
     function extractJSON(text) {
         let cleanText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
         let jsonStart = cleanText.indexOf('{');
@@ -204,7 +235,6 @@ function(query, llm, serverWidget, runtime, log, record, search) {
         return cleanText;
     }
 
-    // Helper: Aggressively removes HTML markdown wrappers
     function cleanMarkdown(text) {
         return text.replace(/```html/gi, "").replace(/```/g, "").trim();
     }
@@ -213,10 +243,28 @@ function(query, llm, serverWidget, runtime, log, record, search) {
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
+    function executeGetRecordSchema(recordType) {
+        try {
+            // Creates a dynamic dummy record just to fetch the available internal field IDs
+            let dummyRec = record.create({ type: recordType, isDynamic: true });
+            let fields = dummyRec.getFields();
+            
+            return JSON.stringify({
+                status: "Success",
+                recordType: recordType,
+                available_fields: fields
+            });
+        } catch (e) {
+            return JSON.stringify({
+                status: "Error",
+                message: "Failed to load schema for " + recordType + ". It might be an invalid record type or a sub-record. Error: " + e.message
+            });
+        }
+    }
+
     function executeCreateSearch(jsonConfigString) {
         let searchConfig;
         
-        // 1. Attempt to parse the JSON provided by Agent 2
         try {
             let extracted = extractJSON(jsonConfigString);
             searchConfig = JSON.parse(extracted);
@@ -225,7 +273,6 @@ function(query, llm, serverWidget, runtime, log, record, search) {
             return "Execution Error: AI provided invalid JSON format for the search criteria.";
         }
 
-        // 2. Attempt to create the search in NetSuite
         try {
             const timestamp = new Date().getTime();
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
@@ -244,7 +291,6 @@ function(query, llm, serverWidget, runtime, log, record, search) {
             });
 
         } catch (e) {
-            // If NetSuite rejects it, log the exact payload to debug hallucinated fields
             log.error('Search Creation Rejected', e.message + " | Payload: " + JSON.stringify(searchConfig));
             return "Execution Error: NetSuite rejected the search criteria. This is usually due to the AI guessing an incorrect field name or filter operator. Details: " + e.message;
         }
@@ -302,7 +348,7 @@ function(query, llm, serverWidget, runtime, log, record, search) {
                     input.disabled = true; btn.disabled = true;
                     
                     var loadingId = 'loading-' + Date.now();
-                    box.innerHTML += '<div id="' + loadingId + '" class="loader">Executing Pipeline: Analysis -> Execution -> Audit -> Format -> Review...</div>';
+                    box.innerHTML += '<div id="' + loadingId + '" class="loader">Executing Pipeline: Analysis -> Schema Check -> Execution -> Audit -> Format -> Review...</div>';
                     box.scrollTop = box.scrollHeight;
 
                     try {
