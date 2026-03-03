@@ -252,7 +252,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 6. UI RENDERER (Merging File 1 CSS with File 2 Status Updates)
     // ========================================================================
     function renderUI(context) {
-        const form = serverWidget.createForm({ title: 'Jules MAS: Search Auto-Creator' });
+        const form = serverWidget.createForm({ title: 'NetSuite AI  MAS: Search Auto-Creator' });
         const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
         
         htmlField.defaultValue = `
@@ -270,7 +270,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 a { color: #1a73e8; text-decoration: underline; font-weight: 600; }
             </style>
             <div id="chat-box">
-                <div class="ai-msg">I am Jules. My multi-agent pipeline is active. How can I help you today?</div>
+                <div class="ai-msg">I am NetSuite AI . My multi-agent pipeline is active. How can I help you today?</div>
             </div>
             <div class="input-area">
                 <input type="text" id="user-input" placeholder="Example: Create a saved search for customers in California..." onkeydown="if(event.key === 'Enter') sendMessage()">
