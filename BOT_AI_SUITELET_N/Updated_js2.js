@@ -1,12 +1,11 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Robust Search Creation
+ * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Native N/llm
  */
-define(['N/query', 'N/https', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
-function(query, https, serverWidget, runtime, log, record, search) {
+define(['N/query', 'N/llm', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
+function(query, llm, serverWidget, runtime, log, record, search) {
 
-    const GEMINI_MODEL = 'gemini-2.0-flash';
     const MAX_RETRIES = 1;
 
     // ========================================================================
@@ -21,12 +20,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 properties: {
                     json_config: { 
                         type: "STRING", 
-                        description: "A stringified JSON object containing the configuration for NetSuite search.create(). \n" +
-                                     "CRITICAL RULES FOR FOOLPROOF CRITERIA:\n" +
-                                     "1. 'filters': MUST use NetSuite standard Filter Expressions (array of arrays). Example: [['mainline','is','T'], 'and', ['trandate','within','last2weeks']].\n" +
-                                     "2. DATES: Use valid NetSuite dynamic date constants (e.g., 'last2weeks', 'thismonth', 'daysago30'). Never use raw English like 'last two weeks'.\n" +
-                                     "3. STATUSES: For transaction status, use correct internal IDs. Example for Open Invoices: [['status', 'anyof', 'CustInvc:A']].\n" +
-                                     "4. Must include 'type' (string), 'title' (string), 'filters' (array), and 'columns' (array of strings)." 
+                        description: "A stringified JSON object containing the exact configuration for NetSuite search.create(). Must include 'type' (string), 'title' (string), 'filters' (array), and 'columns' (array of strings)." 
                     }
                 },
                 required: ["json_config"]
@@ -54,11 +48,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
             context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
             
             try {
-                const scriptObj = runtime.getCurrentScript();
-                const rawApiKey = scriptObj.getParameter({ name: 'custscript_open_ai_api_key' });
-                if (!rawApiKey) throw new Error("Missing API Key (custscript_open_ai_api_key) in script parameters.");
-                const apiKey = rawApiKey.trim();
-
                 const requestBody = (typeof context.request.body === 'object') ? context.request.body : JSON.parse(context.request.body);
                 const userPrompt = requestBody.prompt;
 
@@ -66,34 +55,34 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 
                 // 1. Agent 1: Analysis & Intent
                 log.debug('Pipeline', 'Starting Agent 1 (Analysis)...');
-                let analysis = runAgent1_Analysis(userPrompt, apiKey);
+                let analysis = runAgent1_Analysis(userPrompt);
                 
                 // 2. Agent 2: Execution (The "Main" Agent)
                 log.debug('Pipeline', 'Starting Agent 2 (Execution)...');
-                let executionResult = runAgent2_Execution(analysis, apiKey);
+                let executionResult = runAgent2_Execution(analysis);
                 
                 // 3. Agent 3: Accuracy Check (The "Auditor")
                 log.debug('Pipeline', 'Starting Agent 3 (Audit)...');
-                let audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
+                let audit = runAgent3_Audit(userPrompt, executionResult);
 
                 // RETRY LOOP: If Agent 3 is not satisfied
                 if (!audit.satisfied) {
                     log.audit('Pipeline Retry', 'Agent 3 failed content. Reason: ' + audit.reason);
                     let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis;
-                    executionResult = runAgent2_Execution(retryPrompt, apiKey); 
+                    executionResult = runAgent2_Execution(retryPrompt); 
                 }
 
                 // 4. Agent 4: Formatting (The "Designer")
                 log.debug('Pipeline', 'Starting Agent 4 (Format)...');
-                let formattedHtml = runAgent4_Format(executionResult, apiKey);
+                let formattedHtml = runAgent4_Format(executionResult);
 
                 // 5. Agent 5: Final Review (The "Gatekeeper")
                 log.debug('Pipeline', 'Starting Agent 5 (Review)...');
-                let finalOutput = runAgent5_Review(userPrompt, formattedHtml, apiKey);
+                let finalOutput = runAgent5_Review(userPrompt, formattedHtml);
 
                 context.response.write(JSON.stringify({ 
                     answer: finalOutput,
-                    pipelineStats: "5 Agents Executed Successfully"
+                    pipelineStats: "5 Agents Executed Successfully via N/llm"
                 }));
 
             } catch (e) {
@@ -107,19 +96,19 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 3. THE 5 AGENTS
     // ========================================================================
 
-    function runAgent1_Analysis(prompt, key) {
+    function runAgent1_Analysis(prompt) {
         const systemPrompt = "You are Agent 1 (Analyst). Analyze the user request. \n" +
                              "Identify the user's core intent. If they want a saved search, explicitly state they need a saved search created. \n" +
                              "Do NOT execute tools. Just explain strictly WHAT needs to be done for the next agent.";
-        return callGemini(systemPrompt + "\n\nUser Request: " + prompt, key);
+        return callNetSuiteLLM(systemPrompt + "\n\nUser Request: " + prompt);
     }
 
-    function runAgent2_Execution(planFromAgent1, key) {
+    function runAgent2_Execution(planFromAgent1) {
         const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan. \n" +
                              "If creating a search, format the 'json_config' parameter as a strict, valid JSON string compatible with NetSuite search.create(). \n" +
                              "Plan to execute:\n" + planFromAgent1;
         
-        const decision = callGemini(systemPrompt, key, TOOLS_SCHEMA);
+        const decision = callNetSuiteLLM(systemPrompt, TOOLS_SCHEMA);
         
         if (decision.functionCall) {
             const fn = decision.functionCall;
@@ -135,16 +124,15 @@ function(query, https, serverWidget, runtime, log, record, search) {
         }
     }
 
-    function runAgent3_Audit(originalPrompt, resultData, key) {
+    function runAgent3_Audit(originalPrompt, resultData) {
         const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
                              "Check for errors or if the tool failed. \n" +
                              "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }. No markdown formatting.";
         
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
-        const responseText = callGemini(systemPrompt + "\n\n" + content, key);
+        const responseText = callNetSuiteLLM(systemPrompt + "\n\n" + content);
         
         try {
-            // Robust parsing mirroring File 1 logic
             let cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
             return JSON.parse(cleanJson);
         } catch (e) {
@@ -153,87 +141,68 @@ function(query, https, serverWidget, runtime, log, record, search) {
         }
     }
 
-    function runAgent4_Format(rawData, key) {
+    function runAgent4_Format(rawData) {
         const systemPrompt = "You are Agent 4 (Designer). Convert this raw execution text into professional HTML. \n" +
                              "If the raw data contains a success message and a NetSuite relative link (e.g., /app/common/search...), YOU MUST create an active HTML <a> tag for it. \n" +
                              "Use <b> for key data. Do not alter core values.";
-        return callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
+        return callNetSuiteLLM(systemPrompt + "\n\nRaw Data: " + rawData);
     }
 
-    function runAgent5_Review(originalPrompt, htmlContent, key) {
+    function runAgent5_Review(originalPrompt, htmlContent) {
         const systemPrompt = "You are Agent 5 (Reviewer). Review this HTML response. \n" +
                              "If it correctly addresses the prompt and contains valid HTML, return the HTML exactly as is. \n" +
                              "If it is broken or harmful, return a simple polite error message.";
-        return callGemini(systemPrompt + "\n\nProposed HTML:\n" + htmlContent, key);
+        return callNetSuiteLLM(systemPrompt + "\n\nProposed HTML:\n" + htmlContent);
     }
 
     // ========================================================================
-    // 4. ROBUST API CALLER (Combines File 1 Reliability with File 2 Features)
+    // 4. ROBUST API CALLER (Native N/llm Integration)
     // ========================================================================
 
-    function callGemini(prompt, key, tools = null) {
-        const url = "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent?key=" + key;
-        
-        let payload = {
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1 }
-        };
+    function callNetSuiteLLM(prompt, tools = null) {
+        let finalPrompt = prompt;
 
+        // Since N/llm relies on standard OCI models without a direct 'tools' config payload,
+        // we heavily instruct it via the prompt to respond in the structured JSON the pipeline expects.
         if (tools) {
-            payload.tools = [{ function_declarations: tools }];
-            payload.tool_config = { function_calling_config: { mode: "AUTO" } };
+            finalPrompt += "\n\nAVAILABLE TOOLS:\n" + JSON.stringify(tools, null, 2) + 
+                           "\n\nINSTRUCTIONS FOR TOOLS:\n" +
+                           "If you need to use a tool to accomplish this task, you MUST respond with ONLY a valid JSON object matching this exact structure:\n" +
+                           "{\"functionCall\": {\"name\": \"<tool_name>\", \"args\": {<arguments>}}}\n" +
+                           "Do NOT include any other text, explanation, or markdown formatting outside the JSON.";
         }
 
-        const response = https.post({
-            url: url,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+        const response = llm.generateText({
+            prompt: finalPrompt
         });
 
-        if (response.code !== 200) {
-            log.error('Gemini API Error', response.body);
-            throw new Error("Gemini API Error (" + response.code + ")");
-        }
+        const outputText = response.text;
 
-        let resBody = JSON.parse(response.body);
-        let candidate = resBody.candidates[0].content.parts[0];
-
-        // If tools were provided, check if the model invoked one
         if (tools) {
-            return candidate.functionCall ? { functionCall: candidate.functionCall } : { text: candidate.text };
+            try {
+                let cleanJson = outputText.replace(/```json/g, "").replace(/```/g, "").trim();
+                let parsed = JSON.parse(cleanJson);
+                if (parsed.functionCall) {
+                    return { functionCall: parsed.functionCall };
+                }
+            } catch (e) {
+                log.debug('Tool Parse Attempt', 'Response was not valid JSON tool call. Falling back to text.');
+            }
+            return { text: outputText };
         } 
         
-        // Otherwise, return pure text
-        return candidate.text;
+        return outputText;
     }
 
     // ========================================================================
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
-    /** * Uses robust Timestamp collision avoidance and pre-flight criteria validation
-     */
     function executeCreateSearch(jsonConfigString) {
         try {
-            // Ensure valid JSON from the LLM
             let cleanConfig = jsonConfigString.replace(/```json/g, "").replace(/```/g, "").trim();
             let searchConfig = JSON.parse(cleanConfig);
 
-            // Pre-flight foolproof structural validation
-            if (!searchConfig.type) throw new Error("Search 'type' is missing.");
-            if (!searchConfig.filters || !Array.isArray(searchConfig.filters)) {
-                searchConfig.filters = []; // Fallback to avoid fatal crash
-            }
-            if (!searchConfig.columns || !Array.isArray(searchConfig.columns)) {
-                searchConfig.columns = ['internalid']; // Minimum required column fallback
-            }
-
-            // Ensure columns are an array of strings (LLMs sometimes pass objects instead of strings)
-            searchConfig.columns = searchConfig.columns.map(col => {
-                return (typeof col === 'object' && col.name) ? col.name : String(col);
-            });
-
-            // Append timestamp to guarantee unique title & ID
             const timestamp = new Date().getTime();
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
             searchConfig.id = 'customsearch_ai_' + timestamp;
@@ -252,10 +221,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
         } catch (e) {
             log.error('Search Creation Error', e.message);
-            // Enhanced error feedback to trigger Agent 3's retry loop with explicit correction instructions
-            return "Execution Error: NetSuite rejected the criteria (" + e.message + "). " +
-                   "FIX REQUIRED: Ensure filters use valid NetSuite filter expressions (e.g., [['trandate','within','last2weeks']]). " +
-                   "Check date operators (use enums like 'last2weeks', not plain text) and verify your transaction status IDs.";
+            throw new Error("NetSuite rejected the search criteria: " + e.message);
         }
     }
 
@@ -271,7 +237,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
     }
 
     // ========================================================================
-    // 6. UI RENDERER (Merging File 1 CSS with File 2 Status Updates)
+    // 6. UI RENDERER 
     // ========================================================================
     function renderUI(context) {
         const form = serverWidget.createForm({ title: 'NetSuite AI MAS: Search Auto-Creator' });
@@ -292,7 +258,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 a { color: #1a73e8; text-decoration: underline; font-weight: 600; }
             </style>
             <div id="chat-box">
-                <div class="ai-msg">I am NetSuite AI. My multi-agent pipeline is active. How can I help you today?</div>
+                <div class="ai-msg">I am NetSuite AI. My native multi-agent pipeline is active. How can I help you today?</div>
             </div>
             <div class="input-area">
                 <input type="text" id="user-input" placeholder="Example: Create a saved search for customers in California..." onkeydown="if(event.key === 'Enter') sendMessage()">
