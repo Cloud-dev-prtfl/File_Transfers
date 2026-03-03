@@ -21,7 +21,12 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 properties: {
                     json_config: { 
                         type: "STRING", 
-                        description: "A stringified JSON object containing the exact configuration for NetSuite search.create(). Must include 'type' (string), 'title' (string), 'filters' (array), and 'columns' (array of strings)." 
+                        description: "A stringified JSON object containing the configuration for NetSuite search.create(). \n" +
+                                     "CRITICAL RULES FOR FOOLPROOF CRITERIA:\n" +
+                                     "1. 'filters': MUST use NetSuite standard Filter Expressions (array of arrays). Example: [['mainline','is','T'], 'and', ['trandate','within','last2weeks']].\n" +
+                                     "2. DATES: Use valid NetSuite dynamic date constants (e.g., 'last2weeks', 'thismonth', 'daysago30'). Never use raw English like 'last two weeks'.\n" +
+                                     "3. STATUSES: For transaction status, use correct internal IDs. Example for Open Invoices: [['status', 'anyof', 'CustInvc:A']].\n" +
+                                     "4. Must include 'type' (string), 'title' (string), 'filters' (array), and 'columns' (array of strings)." 
                     }
                 },
                 required: ["json_config"]
@@ -206,7 +211,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
-    /** * Uses the robust Timestamp collision avoidance from File 1
+    /** * Uses robust Timestamp collision avoidance and pre-flight criteria validation
      */
     function executeCreateSearch(jsonConfigString) {
         try {
@@ -214,7 +219,21 @@ function(query, https, serverWidget, runtime, log, record, search) {
             let cleanConfig = jsonConfigString.replace(/```json/g, "").replace(/```/g, "").trim();
             let searchConfig = JSON.parse(cleanConfig);
 
-            // File 1 Magic: Append timestamp to guarantee unique title & ID
+            // Pre-flight foolproof structural validation
+            if (!searchConfig.type) throw new Error("Search 'type' is missing.");
+            if (!searchConfig.filters || !Array.isArray(searchConfig.filters)) {
+                searchConfig.filters = []; // Fallback to avoid fatal crash
+            }
+            if (!searchConfig.columns || !Array.isArray(searchConfig.columns)) {
+                searchConfig.columns = ['internalid']; // Minimum required column fallback
+            }
+
+            // Ensure columns are an array of strings (LLMs sometimes pass objects instead of strings)
+            searchConfig.columns = searchConfig.columns.map(col => {
+                return (typeof col === 'object' && col.name) ? col.name : String(col);
+            });
+
+            // Append timestamp to guarantee unique title & ID
             const timestamp = new Date().getTime();
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
             searchConfig.id = 'customsearch_ai_' + timestamp;
@@ -233,7 +252,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
         } catch (e) {
             log.error('Search Creation Error', e.message);
-            throw new Error("NetSuite rejected the search criteria: " + e.message);
+            // Enhanced error feedback to trigger Agent 3's retry loop with explicit correction instructions
+            return "Execution Error: NetSuite rejected the criteria (" + e.message + "). " +
+                   "FIX REQUIRED: Ensure filters use valid NetSuite filter expressions (e.g., [['trandate','within','last2weeks']]). " +
+                   "Check date operators (use enums like 'last2weeks', not plain text) and verify your transaction status IDs.";
         }
     }
 
@@ -252,7 +274,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 6. UI RENDERER (Merging File 1 CSS with File 2 Status Updates)
     // ========================================================================
     function renderUI(context) {
-        const form = serverWidget.createForm({ title: 'NetSuite AI  MAS: Search Auto-Creator' });
+        const form = serverWidget.createForm({ title: 'NetSuite AI MAS: Search Auto-Creator' });
         const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
         
         htmlField.defaultValue = `
@@ -270,7 +292,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 a { color: #1a73e8; text-decoration: underline; font-weight: 600; }
             </style>
             <div id="chat-box">
-                <div class="ai-msg">I am NetSuite AI . My multi-agent pipeline is active. How can I help you today?</div>
+                <div class="ai-msg">I am NetSuite AI. My multi-agent pipeline is active. How can I help you today?</div>
             </div>
             <div class="input-area">
                 <input type="text" id="user-input" placeholder="Example: Create a saved search for customers in California..." onkeydown="if(event.key === 'Enter') sendMessage()">
