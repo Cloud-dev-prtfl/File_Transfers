@@ -1,7 +1,7 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- * @Description Project Jules: MAS with Autonomous Criteria Validation Loop
+ * @Description Project Jules: MAS with Autonomous Criteria Validation & Bulletproof Parsing
  */
 define(['N/query', 'N/https', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
 function(query, https, serverWidget, runtime, log, record, search) {
@@ -52,28 +52,28 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 if (!rawApiKey) throw new Error("Missing API Key.");
                 const apiKey = rawApiKey.trim();
 
-                const requestBody = (typeof context.request.body === 'object') ? context.request.body : JSON.parse(context.request.body);
+                // Safely parse the incoming request body
+                let requestBody;
+                try {
+                    requestBody = (typeof context.request.body === 'object') ? context.request.body : JSON.parse(context.request.body || '{}');
+                } catch (e) {
+                    throw new Error("Invalid request body format from UI.");
+                }
+                
                 const userPrompt = requestBody.prompt;
 
                 // --- START MULTI-AGENT PIPELINE ---
                 
-                // Agent 1: Analysis
                 let analysis = runAgent1_Analysis(userPrompt, apiKey);
-                
-                // Agent 2: Execution (Now upgraded with a ReAct Loop for Criteria Validation)
                 let executionResult = runAgent2_Execution(analysis, apiKey);
                 
-                // Agent 3: Audit
                 let audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
                 if (!audit.satisfied) {
                     let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis;
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                 }
 
-                // Agent 4: Formatting (Now strips Markdown)
                 let formattedHtml = runAgent4_Format(executionResult, apiKey);
-
-                // Agent 5: Review (Final Markdown wipe and safety check)
                 let finalOutput = runAgent5_Review(userPrompt, formattedHtml, apiKey);
 
                 context.response.write(JSON.stringify({ 
@@ -83,6 +83,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
             } catch (e) {
                 log.error('Pipeline Error', e.message);
+                // This ensures the frontend receives a clean JSON error response, not raw text
                 context.response.write(JSON.stringify({ error: "Pipeline Error: " + e.message }));
             }
         }
@@ -93,26 +94,22 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // ========================================================================
 
     function runAgent1_Analysis(prompt, key) {
-        const systemPrompt = "You are Agent 1 (Analyst). Identify the user's core intent. If they want a search involving specific statuses (like 'open invoices'), explicitly instruct the next agent to look up the exact NetSuite status codes first.";
+        const systemPrompt = "You are Agent 1 (Analyst). Identify the user's core intent. If they want a search involving specific statuses (like 'open invoices'), explicitly instruct the next agent to look up the exact NetSuite status codes first via SuiteQL.";
         return callGemini(systemPrompt + "\n\nUser Request: " + prompt, key);
     }
 
-    /**
-     * UPGRADE: ReAct (Reason + Act) Loop.
-     * Allows the Agent to call SuiteQL to fetch criteria, read the result, and THEN build the search.
-     */
     function runAgent2_Execution(planFromAgent1, key) {
         const systemPrompt = "You are Agent 2 (Execution). You have access to tools.\n" +
-                             "CRITICAL RULE: If you are asked to filter by a specific status (e.g., 'Open Invoices'), you MUST first use the 'run_suiteql' tool to query the 'transactionstatus' table to find the exact ID (e.g. CustInvc:A).\n" +
+                             "CRITICAL RULE: If asked to filter by status (e.g., 'Open Invoices'), you MUST first use the 'run_suiteql' tool to query the 'transactionstatus' table to find the exact ID (e.g. CustInvc:A).\n" +
                              "Once you have the exact IDs, use the 'create_saved_search' tool. If a tool returns an error, adjust your query/json and try again.";
         
         let conversationPrompt = "Plan: " + planFromAgent1;
         let step = 0;
-        let maxSteps = 4; // Max tool calls before forcing an exit
+        let maxSteps = 4;
 
         while (step < maxSteps) {
             step++;
-            log.debug('Agent 2 Loop', 'Step ' + step + '\nPrompt: ' + conversationPrompt);
+            log.debug('Agent 2 Loop', 'Step ' + step);
             
             let decision = callGemini(systemPrompt + "\n\n" + conversationPrompt, key, TOOLS_SCHEMA);
             
@@ -121,28 +118,24 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 let observation = "";
                 
                 try {
-                    if (fn.name === 'create_saved_search') observation = executeCreateSearch(fn.args.json_config);
+                    if (fn.name === 'create_saved_search') observation = executeCreateSearch(fn.args.json_config || fn.args);
                     else if (fn.name === 'run_suiteql') observation = executeSuiteQL(fn.args.query);
                     else observation = "Error: Unknown Tool " + fn.name;
                 } catch (e) {
                     observation = "Execution Error: " + e.message;
                 }
                 
-                // Append the action and result to the conversation for the next loop iteration
-                conversationPrompt += "\n\nAction taken: " + fn.name + " with args: " + JSON.stringify(fn.args);
-                conversationPrompt += "\nObservation: " + observation;
+                conversationPrompt += "\n\nAction taken: " + fn.name + "\nObservation: " + observation;
                 conversationPrompt += "\nBased on the observation, determine your next step or final text response.";
 
-                // If search was created successfully, break loop and return
                 if (fn.name === 'create_saved_search' && observation.indexOf("Success") > -1) {
                     return observation; 
                 }
             } else {
-                // Agent decided to just reply with text
                 return decision.text || conversationPrompt;
             }
         }
-        return conversationPrompt; // Return log if it times out
+        return conversationPrompt; 
     }
 
     function runAgent3_Audit(originalPrompt, resultData, key) {
@@ -150,7 +143,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
         const responseText = callGemini(systemPrompt + "\n\n" + content, key);
         try {
-            let cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
+            let cleanJson = responseText.replace(/```json/gi, "").replace(/```/g, "").trim();
             return JSON.parse(cleanJson);
         } catch (e) {
             return { satisfied: true, reason: "Parse bypass." }; 
@@ -160,16 +153,12 @@ function(query, https, serverWidget, runtime, log, record, search) {
     function runAgent4_Format(rawData, key) {
         const systemPrompt = "You are Agent 4 (Designer). Convert raw text into professional HTML. Use <b> for key data. DO NOT output markdown code blocks.";
         let htmlResponse = callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
-        
-        // FIX: Strip markdown formatting block that was causing UI display issues
         return htmlResponse.replace(/```html/gi, '').replace(/```/g, '').trim();
     }
 
     function runAgent5_Review(originalPrompt, htmlContent, key) {
         const systemPrompt = "You are Agent 5 (Reviewer). Ensure this HTML directly answers the prompt. DO NOT output markdown code blocks.";
         let reviewResponse = callGemini(systemPrompt + "\n\nProposed HTML:\n" + htmlContent, key);
-        
-        // FIX: Final sanitization pass
         return reviewResponse.replace(/```html/gi, '').replace(/```/g, '').trim();
     }
 
@@ -186,19 +175,44 @@ function(query, https, serverWidget, runtime, log, record, search) {
         }
 
         const response = https.post({ url: url, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (response.code !== 200) throw new Error("API Error: " + response.body);
+        
+        if (response.code !== 200) {
+            throw new Error("Gemini API Error: Status " + response.code);
+        }
 
-        let candidate = JSON.parse(response.body).candidates[0].content.parts[0];
+        let resBody;
+        try {
+            resBody = JSON.parse(response.body);
+        } catch(e) {
+             throw new Error("Failed to parse Gemini API response payload.");
+        }
+
+        let candidate = resBody.candidates[0].content.parts[0];
         return (tools && candidate.functionCall) ? { functionCall: candidate.functionCall } : { text: candidate.text };
     }
 
     // ========================================================================
-    // 5. NATIVE EXECUTORS
+    // 5. NATIVE EXECUTORS (With Aggressive Type Checking)
     // ========================================================================
-    function executeCreateSearch(jsonConfigString) {
+    function executeCreateSearch(configPayload) {
         try {
-            let cleanConfig = jsonConfigString.replace(/```json/g, "").replace(/```/g, "").trim();
-            let searchConfig = JSON.parse(cleanConfig);
+            let searchConfig;
+            
+            // AI sometimes returns a pure object, sometimes a string. We handle both.
+            if (typeof configPayload === 'object') {
+                searchConfig = configPayload;
+            } else if (typeof configPayload === 'string') {
+                let cleanConfig = configPayload.replace(/```json/gi, "").replace(/```/g, "").trim();
+                searchConfig = JSON.parse(cleanConfig);
+            } else {
+                throw new Error("Tool arguments provided in an invalid format.");
+            }
+
+            // If the AI nested the JSON config string inside the object property
+            if (searchConfig.json_config && typeof searchConfig.json_config === 'string') {
+                let nestedClean = searchConfig.json_config.replace(/```json/gi, "").replace(/```/g, "").trim();
+                searchConfig = JSON.parse(nestedClean);
+            }
 
             const timestamp = new Date().getTime();
             searchConfig.title = (searchConfig.title || "AI Search") + " (" + timestamp + ")";
@@ -209,18 +223,18 @@ function(query, https, serverWidget, runtime, log, record, search) {
             return "Success! Created Search: " + searchConfig.title + ". Link: <a href='/app/common/search/searchresults.nl?searchid=" + searchId + "'>View Search</a>";
 
         } catch (e) {
-            return "Execution Error: " + e.message; // Caught by the loop as an "Observation"
+            return "Execution Error: " + e.message; 
         }
     }
 
     function executeSuiteQL(q) {
         try {
-            let cleanQuery = q.replace(/```sql/g,'').replace(/```/g,'').trim();
+            let cleanQuery = (typeof q === 'string') ? q.replace(/```sql/gi,'').replace(/```/g,'').trim() : String(q);
             let res = query.runSuiteQL({ query: cleanQuery });
             let rows = res.asMappedResults().slice(0, 15);
             return rows.length ? JSON.stringify(rows) : "No records found matching query.";
         } catch(e) {
-            return "SuiteQL Error: " + e.message; // Caught by the loop
+            return "SuiteQL Error: " + e.message; 
         }
     }
 
@@ -267,8 +281,8 @@ function(query, https, serverWidget, runtime, log, record, search) {
                         document.getElementById(loadId).remove();
                         box.innerHTML += data.error ? '<div class="error-msg">' + data.error + '</div>' : '<div class="ai-msg">' + data.answer + '</div>';
                     } catch (e) {
-                        document.getElementById(loadId).remove();
-                        box.innerHTML += '<div class="error-msg">Connection Error</div>';
+                        if(document.getElementById(loadId)) document.getElementById(loadId).remove();
+                        box.innerHTML += '<div class="error-msg">Connection Error: Could not parse server response.</div>';
                     }
                     box.scrollTop = box.scrollHeight;
                 }
