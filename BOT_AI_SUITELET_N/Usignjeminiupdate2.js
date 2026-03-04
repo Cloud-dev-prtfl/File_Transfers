@@ -15,11 +15,22 @@ function(query, https, serverWidget, runtime, log, record, search) {
     const TOOLS_SCHEMA = [
         {
             name: "get_record_fields",
-            description: "Fetches valid NetSuite internal field IDs for a given record type. ALWAYS use this FIRST to validate field names before creating a saved search.",
+            description: "Fetches valid NetSuite internal body field IDs for a given record type. Use for standard record operations and basic filters.",
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record (e.g., 'customer', 'transaction', 'creditmemo')." }
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record (e.g., 'customer', 'transaction')." }
+                },
+                required: ["record_type"]
+            }
+        },
+        {
+            name: "fetch_online_schema",
+            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'. MUST use this if you are unsure of a search column name or if you encounter an 'invalid column' error.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up (e.g., 'account', 'customer')." }
                 },
                 required: ["record_type"]
             }
@@ -32,7 +43,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 properties: {
                     json_config: { 
                         type: "STRING", 
-                        // Explicitly defining the expected JSON keys for NetSuite
                         description: "A stringified JSON object containing the exact configuration for NetSuite search.create(). Must include 'type' (string), 'title' (string). 'filters' MUST be an array of objects strictly using keys 'name' (field id), 'operator', and 'values' (array). 'columns' MUST be an array of strings." 
                     }
                 },
@@ -80,7 +90,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
                 if (!audit.satisfied) {
                     log.audit('Pipeline Retry', 'Agent 3 failed content. Reason: ' + audit.reason);
-                    let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis;
+                    let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis + "\nIMPORTANT: If the error was 'invalid column', you MUST call 'fetch_online_schema' to find the exact Search Column IDs.";
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                 }
 
@@ -115,11 +125,11 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent2_Execution(planFromAgent1, key) {
         let conversationHistory = "Plan to execute:\n" + planFromAgent1;
-        const maxSteps = 3; 
+        const maxSteps = 4; // Increased to 4 to allow fetching both body fields and online schema
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan. \n" +
-                                 "CRITICAL RULE: If you are asked to create a saved search, you MUST use 'get_record_fields' first to fetch the valid internal IDs. \n" +
+                                 "CRITICAL RULE 1: If creating a saved search, you MUST validate your column names. Use 'fetch_online_schema' to read the NetSuite Records Browser and find valid 'Search Columns'. Do NOT guess column names.\n" +
                                  "CRITICAL RULE 2: When calling 'create_saved_search', ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values' properties. Never use 'field' or 'value' as keys.\n" +
                                  "Current Context:\n" + conversationHistory;
             
@@ -133,8 +143,12 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     if (fn.name === 'get_record_fields') {
                         toolResult = executeGetRecordSchema(fn.args.record_type);
                         conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
-                        log.debug('Agent 2 Loop', 'Fetched schema for ' + fn.args.record_type);
                     } 
+                    else if (fn.name === 'fetch_online_schema') {
+                        toolResult = executeFetchOnlineSchema(fn.args.record_type);
+                        conversationHistory += "\n\nTool 'fetch_online_schema' executed. Online Browser Data:\n" + toolResult;
+                        log.debug('Agent 2 Loop', 'Fetched online schema browser for ' + fn.args.record_type);
+                    }
                     else if (fn.name === 'create_saved_search') {
                         let jsonConfigStr = typeof fn.args.json_config === 'string' ? fn.args.json_config : JSON.stringify(fn.args.json_config);
                         return executeCreateSearch(jsonConfigStr); 
@@ -159,6 +173,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
     function runAgent3_Audit(originalPrompt, resultData, key) {
         const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
                              "Check for errors or if the tool failed. \n" +
+                             "CRITICAL: If the Execution Result mentions 'invalid column' or 'search.createColumn', you MUST return satisfied: false and instruct Agent 2 to use the 'fetch_online_schema' tool to look up the correct Search Column ID from the NetSuite Schema Browser.\n" +
                              "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }. No markdown formatting, no conversational text.";
         
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
@@ -263,8 +278,37 @@ function(query, https, serverWidget, runtime, log, record, search) {
         } catch (e) {
             return JSON.stringify({
                 status: "Error",
-                message: "Failed to load schema for " + recordType + ". It might be an invalid record type or a sub-record. Error: " + e.message
+                message: "Failed to load schema for " + recordType + ". Error: " + e.message
             });
+        }
+    }
+
+    // NEW TOOL: Fetches directly from the NetSuite Records Browser to find Search Columns
+    function executeFetchOnlineSchema(recordType) {
+        try {
+            // Target the SuiteScript records browser to get Search Columns, ensuring it's lowercased
+            const safeType = recordType.toLowerCase().trim();
+            const url = 'https://www.netsuite.com/help/helpcenter/en_US/srbrowser/Browser2020_1/script/record/' + safeType + '.html';
+            
+            const response = https.get({ url: url });
+            
+            if (response.code === 200) {
+                // Strip out HTML tags to keep the payload size reasonable for the LLM
+                let cleanText = response.body
+                    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s+/g, ' ');
+                
+                // Truncate if massively large, but usually records are under limit once HTML is stripped
+                cleanText = cleanText.substring(0, 15000); 
+                
+                return "Successfully scraped NetSuite Records Browser for: " + safeType + ". Look for the 'Search Columns' and 'Search Filters' sections in this data to validate your IDs: " + cleanText;
+            } else {
+                return "Failed to fetch online schema browser. HTTP Code: " + response.code;
+            }
+        } catch(e) {
+            return "Error fetching online schema: " + e.message;
         }
     }
 
@@ -276,10 +320,9 @@ function(query, https, serverWidget, runtime, log, record, search) {
             searchConfig = JSON.parse(extracted);
             
             // SANITIZATION LAYER
-            // Automatically correct the AI if it hallucinated 'field' instead of 'name'
             if (Array.isArray(searchConfig.filters)) {
                 searchConfig.filters = searchConfig.filters.map(f => {
-                    if (Array.isArray(f)) return f; // Allow standard NetSuite filter expressions
+                    if (Array.isArray(f)) return f; 
                     if (typeof f === 'object' && f !== null) {
                         if (f.field && !f.name) f.name = f.field;
                         if (f.id && !f.name) f.name = f.id;
@@ -292,7 +335,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 });
             }
 
-            // Clean up columns if the AI tried to pass objects instead of strings
             if (Array.isArray(searchConfig.columns)) {
                 searchConfig.columns = searchConfig.columns.map(c => {
                     if (typeof c === 'object' && c !== null && c.field && !c.name) {
@@ -345,7 +387,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 6. UI RENDERER 
     // ========================================================================
     function renderUI(context) {
-        // Changed title from "NetSuite AI MAS" to "NetSuite AI assistance"
         const form = serverWidget.createForm({ title: 'NetSuite AI assistance: Search Auto-Creator' });
         const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
         
