@@ -27,7 +27,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
         },
         {
             name: "fetch_online_schema",
-            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'. MUST use this to discover available criteria logic BEFORE creating your technical plan.",
+            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'.",
             parameters: {
                 type: "OBJECT",
                 properties: {
@@ -35,6 +35,11 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 },
                 required: ["record_type"]
             }
+        },
+        {
+            name: "get_netsuite_search_reference",
+            description: "Acts as the NetSuite Help Center guide for valid Search Criteria, Quick Filters (Relative Dates), and Status IDs. MUST use this if the request involves dates, timeframes, or transaction statuses.",
+            parameters: { type: "OBJECT", properties: {} }
         }
     ];
 
@@ -60,6 +65,11 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 },
                 required: ["record_type"]
             }
+        },
+        {
+            name: "get_netsuite_search_reference",
+            description: "Returns the NetSuite Help Center rules for valid Quick Date filters and Status IDs. Use to prevent invalid criteria errors.",
+            parameters: { type: "OBJECT", properties: {} }
         },
         {
             name: "create_saved_search",
@@ -122,7 +132,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     
                     let retryPrompt = "Attempt " + retryCount + " failed. Auditor Reason: " + audit.reason + "\n" +
                                       "Original Plan:\n" + analysis + "\n" +
-                                      "CRITICAL INSTRUCTION: If the error was 'invalid column' or 'not in proper syntax', the field ID you used is WRONG for searches (even if it exists on the record browser). NetSuite Search IDs differ from Record IDs. You MUST use an alternative field ID (e.g., try 'datecreated' instead of 'createddate') or find another logical criteria to achieve the same result.";
+                                      "CRITICAL INSTRUCTION: If the error was related to an 'invalid column', try an alternative field ID (e.g., 'datecreated' instead of 'createddate'). If the error was related to date strings or statuses, use the 'get_netsuite_search_reference' tool to find the exact allowed values.";
                                       
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                     audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
@@ -156,9 +166,9 @@ function(query, https, serverWidget, runtime, log, record, search) {
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 1 (Analyst). Analyze the user request. \n" +
-                                 "If they want a saved search, you MUST use the tools to look up the available Search Filters and Search Columns FIRST. \n" +
-                                 "Once you have the schema, output a plain-text execution plan for Agent 2 detailing what record type, filters, and columns to use.\n" +
-                                 "CRITICAL RULE: Do NOT output raw JSON code for the search. Do NOT pretend to call the 'create_saved_search' tool (you do not have access to it). Your ONLY job is to write plain-English instructions for Agent 2.";
+                                 "CRITICAL RULE 1: If the request involves dates (e.g., 'last two weeks') or statuses (e.g., 'open invoices'), you MUST call 'get_netsuite_search_reference' to validate the exact allowed values. Do not hallucinate NetSuite date strings or status IDs.\n" +
+                                 "CRITICAL RULE 2: Use 'fetch_online_schema' to find columns and fields.\n" +
+                                 "Once you have the validated schema, output a plain-text execution plan for Agent 2. Do NOT output JSON.";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, ANALYST_TOOLS_SCHEMA);
             
@@ -171,6 +181,9 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     } else if (fn.name === 'get_record_fields') {
                         let toolResult = executeGetRecordSchema(fn.args.record_type);
                         conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
+                    } else if (fn.name === 'get_netsuite_search_reference') {
+                        let toolResult = executeGetSearchReference();
+                        conversationHistory += "\n\nTool 'get_netsuite_search_reference' executed. Reference Guide:\n" + toolResult;
                     } else {
                         conversationHistory += "\n\nError: Unknown Tool " + fn.name;
                     }
@@ -190,9 +203,9 @@ function(query, https, serverWidget, runtime, log, record, search) {
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 2 (Executor). Use the tools to fulfill the plan. \n" +
-                                 "CRITICAL RULE 1: You MUST invoke the 'create_saved_search' tool to actually create the search. Do NOT just output conversational text.\n" +
-                                 "CRITICAL RULE 2: Ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values'.\n" +
-                                 "CRITICAL RULE 3: If you are retrying because of an 'invalid column' or 'syntax' error, DO NOT use the exact same field ID again. Try an alternative Search ID (e.g., 'datecreated' instead of 'createddate') or find another way.";
+                                 "CRITICAL RULE 1: You MUST invoke 'create_saved_search' to create the search. Do NOT just output text.\n" +
+                                 "CRITICAL RULE 2: If setting a Date filter or Status filter, use 'get_netsuite_search_reference' to ensure your value is actually allowed in NetSuite.\n" +
+                                 "CRITICAL RULE 3: If retrying due to an 'invalid column', do not use the exact same field ID again. Try an alternative Search ID (e.g., 'datecreated' vs 'createddate').";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, TOOLS_SCHEMA);
             
@@ -208,6 +221,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     else if (fn.name === 'fetch_online_schema') {
                         toolResult = executeFetchOnlineSchema(fn.args.record_type);
                         conversationHistory += "\n\nTool 'fetch_online_schema' executed. Online Browser Data:\n" + toolResult;
+                    }
+                    else if (fn.name === 'get_netsuite_search_reference') {
+                        toolResult = executeGetSearchReference();
+                        conversationHistory += "\n\nTool 'get_netsuite_search_reference' executed. Reference Guide:\n" + toolResult;
                     }
                     else if (fn.name === 'create_saved_search') {
                         let jsonConfigStr = typeof fn.args.json_config === 'string' ? fn.args.json_config : JSON.stringify(fn.args.json_config);
@@ -239,7 +256,8 @@ function(query, https, serverWidget, runtime, log, record, search) {
     function runAgent3_Audit(originalPrompt, resultData, key) {
         const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
                              "1. If the Execution Result does NOT contain 'status: Success' or an internal ID, return satisfied: false.\n" +
-                             "2. If the Execution Result contains 'invalid column', 'not in proper syntax', or 'search.createColumn', return satisfied: false and explicitly output this reason: 'NetSuite rejected a column/filter. Search IDs often differ from Record IDs (e.g., datecreated vs createddate). Try an alternative field ID or a different logical approach.'\n" +
+                             "2. If the Execution Result contains 'invalid column' or 'not in proper syntax', return satisfied: false and output: 'NetSuite rejected a column/filter. Search IDs often differ from Record IDs (e.g., datecreated vs createddate). Try an alternative field ID.'\n" +
+                             "3. If the Execution Result contains 'invalid search criteria', 'invalid date', or 'status', return satisfied: false and explicitly instruct: 'NetSuite rejected your date range or status format. You MUST call get_netsuite_search_reference to look up the exactly supported strings.'\n" +
                              "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }.";
         
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
@@ -341,6 +359,28 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
+    // NEW KNOWLEDGE BASE TOOL: Hardcoded NetSuite Search Documentation
+    function executeGetSearchReference() {
+        return `
+        NETSUITE SEARCH CRITERIA REFERENCE GUIDE:
+        
+        1. QUICK FILTERS (RELATIVE DATES): 
+           Allowed relative date strings for date fields (like 'trandate', 'datecreated'):
+           'today', 'yesterday', 'tomorrow', 'thisWeek', 'lastWeek', 'nextWeek', 'thisMonth', 'lastMonth', 'nextMonth', 'thisQuarter', 'lastQuarter', 'thisYear', 'lastYear'.
+           -> CRITICAL WARNING: Custom strings like 'lastTwoWeeks', 'last3Days', or 'last6Months' DO NOT EXIST and will crash the script. If a user asks for 'last two weeks', you must either calculate an exact date array ["MM/DD/YYYY", "MM/DD/YYYY"] or approximate using 'lastWeek' or 'thisMonth'.
+        
+        2. TRANSACTION STATUS IDs:
+           Transaction statuses must use strict internal IDs, formatted as RecordType:Status.
+           - Open Invoices: 'CustInvc:Open' (DO NOT use 'Invoice:Open')
+           - Paid Invoices: 'CustInvc:PaidInFull'
+           - Pending Sales Orders: 'SalesOrd:A' (Pending Approval), 'SalesOrd:B' (Pending Fulfillment)
+           - Bills: 'VendBill:Open', 'VendBill:PaidInFull'
+           
+        3. VALID OPERATORS:
+           'is', 'isnot', 'anyof', 'noneof', 'within', 'haskeywords', 'startswith', 'contains', 'between', 'empty', 'notempty'.
+        `;
+    }
+
     function executeGetRecordSchema(recordType) {
         try {
             let dummyRec = record.create({ type: recordType, isDynamic: true });
@@ -415,11 +455,11 @@ function(query, https, serverWidget, runtime, log, record, search) {
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
             searchConfig.id = 'customsearch_ai_' + timestamp;
 
-            // --- ADDED DEBUG LOGS HERE ---
-            log.debug('MAS Search Creation', 'Record Type: ' + searchConfig.type);
-            log.debug('MAS Search Creation', 'Filters: ' + JSON.stringify(searchConfig.filters));
-            log.debug('MAS Search Creation', 'Columns: ' + JSON.stringify(searchConfig.columns));
-            // -----------------------------
+            // --- DEBUG LOGS FOR VISIBILITY ---
+            log.debug('MAS Search Creation', 'Attempting to create search for type: ' + searchConfig.type);
+            log.debug('MAS Search Creation', 'Filters applied: ' + JSON.stringify(searchConfig.filters));
+            log.debug('MAS Search Creation', 'Columns requested: ' + JSON.stringify(searchConfig.columns));
+            // ---------------------------------
 
             const newSearch = search.create(searchConfig);
             const searchId = newSearch.save();
