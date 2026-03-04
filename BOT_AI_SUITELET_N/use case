@@ -59,3 +59,18 @@ The Prompt:
 "Run a SuiteQL query to find all Employees whose first name is 'Zyxwvutsrqponmlkjihgfedcba'. When the query inevitably returns no results or an empty array, generate a PDF that says 'Error: No matching employees found for this report' in large, bold, red text centered on the page, instead of printing an empty table."
 
 Why it tests the system: AI agents are notorious for hallucinating data when a database returns nothing, or simply crashing because they try to map over an undefined array. This tests Agent 2's ability to logically evaluate the run_suiteql output and use an if/else branching logic to generate a completely different PDF layout based on a null result.
+
+
+
+
+Test Case 1: Simple Context Extraction
+
+"I need to log an expense. Create a Vendor Bill for 'Oracle'. We bought 5 'Office Chairs' at a rate of 150 each. Date is today."
+
+What happens: The AI uses SuiteQL to find Oracle's vendor ID, finds the Office Chair item ID, figures out the vendorbill record type, maps the item sublist, and creates it natively.
+
+Test Case 2: Messy OCR "Scanned" Text
+
+"Scanned PDF contents: PO NUM: 9982 | BILL TO: Smith Supplies Ltd | ITEM: Samsung Monitor 24-inch | QTY: 10 | PRICE: $200 | INSTRUCTIONS: Standard ground shipping."
+
+What happens: Agent 1 parses the unstructured "scanned" blob. It identifies it likely needs to create a salesorder for Customer "Smith Supplies Ltd", sets the memo to the instructions, and adds the items.
