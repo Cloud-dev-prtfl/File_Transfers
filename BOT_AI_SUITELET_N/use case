@@ -6,3 +6,7 @@ Create a search for Sales Orders from today with a total over $1000.
 Customers who have a total transaction amount over $5000 but haven't placed an order in the last 3 months.
 
 Save a search for all Customers with a balance greater than 1000.
+
+
+
+Generate a professional 'Monthly Expense Report' PDF template. It needs a centered header. Below that, build a 4-column table with the headers: Date, Expense Category, Employee, and Amount. Add internal CSS to make the table headers bold with a gray background, and add borders to the table cells
