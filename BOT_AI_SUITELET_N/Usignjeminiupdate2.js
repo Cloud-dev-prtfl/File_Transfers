@@ -415,6 +415,12 @@ function(query, https, serverWidget, runtime, log, record, search) {
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
             searchConfig.id = 'customsearch_ai_' + timestamp;
 
+            // --- ADDED DEBUG LOGS HERE ---
+            log.debug('MAS Search Creation', 'Record Type: ' + searchConfig.type);
+            log.debug('MAS Search Creation', 'Filters: ' + JSON.stringify(searchConfig.filters));
+            log.debug('MAS Search Creation', 'Columns: ' + JSON.stringify(searchConfig.columns));
+            // -----------------------------
+
             const newSearch = search.create(searchConfig);
             const searchId = newSearch.save();
 
