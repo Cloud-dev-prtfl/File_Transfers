@@ -10,3 +10,13 @@ Save a search for all Customers with a balance greater than 1000.
 
 
 Generate a professional 'Monthly Expense Report' PDF template. It needs a centered header. Below that, build a 4-column table with the headers: Date, Expense Category, Employee, and Amount. Add internal CSS to make the table headers bold with a gray background, and add borders to the table cells
+
+
+
+Run a SuiteQL query to get the companyname and email of the first 10 customers in the system. Once you have that data, generate a PDF directory report that lists these customers in a clean, formatted table.
+
+
+Create a PDF with a title 'Testing Tags'. I want you to insert a horizontal rule using the <hr> tag, a line break using the <br> tag, and an image placeholder using the <img> tag. Try to use CSS Flexbox to center everything.
+
+
+Create a simple PDF document titled 'Welcome to NetSuite MAS'. Include a brief welcome paragraph, and below that, create a bulleted list of 3 benefits of using AI for NetSuite development.
