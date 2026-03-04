@@ -10,8 +10,25 @@ function(query, https, serverWidget, runtime, log, record, search) {
     const MAX_RETRIES = 1;
 
     // ========================================================================
-    // 1. TOOL DEFINITIONS (Available to Agent 2)
+    // 1. TOOL DEFINITIONS 
     // ========================================================================
+    
+    // Tools exclusively for Agent 1 (Discovery & Planning)
+    const ANALYST_TOOLS_SCHEMA = [
+        {
+            name: "fetch_online_schema",
+            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'. MUST use this to validate fields and record types BEFORE creating your technical plan.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up (e.g., 'account', 'customer')." }
+                },
+                required: ["record_type"]
+            }
+        }
+    ];
+
+    // Tools exclusively for Agent 2 (Execution)
     const TOOLS_SCHEMA = [
         {
             name: "get_record_fields",
@@ -26,11 +43,11 @@ function(query, https, serverWidget, runtime, log, record, search) {
         },
         {
             name: "fetch_online_schema",
-            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'. MUST use this if you are unsure of a search column name or if you encounter an 'invalid column' error.",
+            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns'. Use if you encounter an 'invalid column' error.",
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up (e.g., 'account', 'customer')." }
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up." }
                 },
                 required: ["record_type"]
             }
@@ -117,19 +134,44 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // ========================================================================
 
     function runAgent1_Analysis(prompt, key) {
-        const systemPrompt = "You are Agent 1 (Analyst). Analyze the user request. \n" +
-                             "Identify the user's core intent. If they want a saved search, explicitly state they need a saved search created. \n" +
-                             "Do NOT execute tools. Just explain strictly WHAT needs to be done for the next agent.";
-        return callGemini(systemPrompt + "\n\nUser Request: " + prompt, key);
+        let conversationHistory = "User Request:\n" + prompt;
+        const maxSteps = 3; 
+        
+        for (let i = 0; i < maxSteps; i++) {
+            const systemPrompt = "You are Agent 1 (Analyst). Analyze the user request. \n" +
+                                 "Identify the user's core intent. If they want a saved search or require querying a specific record, you MUST use 'fetch_online_schema' to check the official NetSuite documentation for the correct record internal ID, search filters, and search columns FIRST. \n" +
+                                 "Do NOT guess field names. Once you have the exact schema, write a strict execution plan for Agent 2 detailing exactly what record type, filters, and columns to use.\n" +
+                                 "Current Context:\n" + conversationHistory;
+            
+            const decision = callGemini(systemPrompt, key, ANALYST_TOOLS_SCHEMA);
+            
+            if (decision.functionCall) {
+                const fn = decision.functionCall;
+                try {
+                    if (fn.name === 'fetch_online_schema') {
+                        let toolResult = executeFetchOnlineSchema(fn.args.record_type);
+                        conversationHistory += "\n\nTool 'fetch_online_schema' executed. Online Browser Data:\n" + toolResult;
+                        log.debug('Agent 1 Loop', 'Fetched online schema for ' + fn.args.record_type);
+                    } else {
+                        conversationHistory += "\n\nError: Unknown Tool " + fn.name;
+                    }
+                } catch (e) {
+                    conversationHistory += "\n\nExecution Error: " + e.message;
+                }
+            } else {
+                return decision.text || decision || "Agent 1 determined no action was required.";
+            }
+        }
+        return "Analysis Error: Agent 1 hit maximum loop steps (" + maxSteps + ") without completing the plan. Context: " + conversationHistory;
     }
 
     function runAgent2_Execution(planFromAgent1, key) {
         let conversationHistory = "Plan to execute:\n" + planFromAgent1;
-        const maxSteps = 4; // Increased to 4 to allow fetching both body fields and online schema
+        const maxSteps = 4; 
         
         for (let i = 0; i < maxSteps; i++) {
-            const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan. \n" +
-                                 "CRITICAL RULE 1: If creating a saved search, you MUST validate your column names. Use 'fetch_online_schema' to read the NetSuite Records Browser and find valid 'Search Columns'. Do NOT guess column names.\n" +
+            const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan provided by Agent 1. \n" +
+                                 "CRITICAL RULE 1: Agent 1 has likely provided the exact Search Columns and Filters. Follow them. If something fails, use 'fetch_online_schema' to double-check.\n" +
                                  "CRITICAL RULE 2: When calling 'create_saved_search', ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values' properties. Never use 'field' or 'value' as keys.\n" +
                                  "Current Context:\n" + conversationHistory;
             
@@ -283,24 +325,21 @@ function(query, https, serverWidget, runtime, log, record, search) {
         }
     }
 
-    // NEW TOOL: Fetches directly from the NetSuite Records Browser to find Search Columns
     function executeFetchOnlineSchema(recordType) {
         try {
-            // Target the SuiteScript records browser to get Search Columns, ensuring it's lowercased
             const safeType = recordType.toLowerCase().trim();
+            // Pointing to the SuiteScript browser equivalent of the schema browser for accurate search.create() columns
             const url = 'https://www.netsuite.com/help/helpcenter/en_US/srbrowser/Browser2020_1/script/record/' + safeType + '.html';
             
             const response = https.get({ url: url });
             
             if (response.code === 200) {
-                // Strip out HTML tags to keep the payload size reasonable for the LLM
                 let cleanText = response.body
                     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
                     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
                     .replace(/<[^>]+>/g, ' ')
                     .replace(/\s+/g, ' ');
                 
-                // Truncate if massively large, but usually records are under limit once HTML is stripped
                 cleanText = cleanText.substring(0, 15000); 
                 
                 return "Successfully scraped NetSuite Records Browser for: " + safeType + ". Look for the 'Search Columns' and 'Search Filters' sections in this data to validate your IDs: " + cleanText;
