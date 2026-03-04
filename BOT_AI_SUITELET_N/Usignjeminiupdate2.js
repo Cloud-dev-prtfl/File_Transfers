@@ -1,7 +1,7 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- * @Description Multi-Agent System (MAS) for NetSuite - Integrated with Gemini API, Schema Validation & ReAct Loop
+ * @Description NetSuite AI assistance - Integrated with Gemini API, Schema Validation & ReAct Loop
  */
 define(['N/query', 'N/https', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
 function(query, https, serverWidget, runtime, log, record, search) {
@@ -32,7 +32,8 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 properties: {
                     json_config: { 
                         type: "STRING", 
-                        description: "A stringified JSON object containing the exact configuration for NetSuite search.create(). Must include 'type' (string), 'title' (string), 'filters' (array), and 'columns' (array of strings)." 
+                        // Explicitly defining the expected JSON keys for NetSuite
+                        description: "A stringified JSON object containing the exact configuration for NetSuite search.create(). Must include 'type' (string), 'title' (string). 'filters' MUST be an array of objects strictly using keys 'name' (field id), 'operator', and 'values' (array). 'columns' MUST be an array of strings." 
                     }
                 },
                 required: ["json_config"]
@@ -60,7 +61,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
             context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
             
             try {
-                // Fetch Gemini API Key from Script Parameters
                 const scriptObj = runtime.getCurrentScript();
                 const rawApiKey = scriptObj.getParameter({ name: 'custscript_open_ai_api_key' });
                 if (!rawApiKey) throw new Error("Missing API Key (custscript_open_ai_api_key) in script parameters.");
@@ -69,32 +69,24 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 const requestBody = (typeof context.request.body === 'object') ? context.request.body : JSON.parse(context.request.body);
                 const userPrompt = requestBody.prompt;
 
-                // --- START MULTI-AGENT PIPELINE ---
-                
-                // 1. Agent 1: Analysis & Intent
                 log.debug('Pipeline', 'Starting Agent 1 (Analysis)...');
                 let analysis = runAgent1_Analysis(userPrompt, apiKey);
                 
-                // 2. Agent 2: Execution (The "Main" Agent with Loop)
                 log.debug('Pipeline', 'Starting Agent 2 (Execution with Schema Check)...');
                 let executionResult = runAgent2_Execution(analysis, apiKey);
                 
-                // 3. Agent 3: Accuracy Check (The "Auditor")
                 log.debug('Pipeline', 'Starting Agent 3 (Audit)...');
                 let audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
 
-                // RETRY LOOP: If Agent 3 is not satisfied
                 if (!audit.satisfied) {
                     log.audit('Pipeline Retry', 'Agent 3 failed content. Reason: ' + audit.reason);
                     let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis;
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                 }
 
-                // 4. Agent 4: Formatting (The "Designer")
                 log.debug('Pipeline', 'Starting Agent 4 (Format)...');
                 let formattedHtml = runAgent4_Format(executionResult, apiKey);
 
-                // 5. Agent 5: Final Review (The "Gatekeeper")
                 log.debug('Pipeline', 'Starting Agent 5 (Review)...');
                 let finalOutput = runAgent5_Review(userPrompt, formattedHtml, apiKey);
 
@@ -123,12 +115,12 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent2_Execution(planFromAgent1, key) {
         let conversationHistory = "Plan to execute:\n" + planFromAgent1;
-        const maxSteps = 3; // Allow the agent up to 3 turns to fetch schema, then create search
+        const maxSteps = 3; 
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan. \n" +
-                                 "CRITICAL RULE: If you are asked to create a saved search, you MUST use 'get_record_fields' first to fetch the valid internal IDs for the record you are querying. Do not guess field names. \n" +
-                                 "Once you have the valid fields, call 'create_saved_search'. \n" +
+                                 "CRITICAL RULE: If you are asked to create a saved search, you MUST use 'get_record_fields' first to fetch the valid internal IDs. \n" +
+                                 "CRITICAL RULE 2: When calling 'create_saved_search', ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values' properties. Never use 'field' or 'value' as keys.\n" +
                                  "Current Context:\n" + conversationHistory;
             
             const decision = callGemini(systemPrompt, key, TOOLS_SCHEMA);
@@ -140,17 +132,15 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 try {
                     if (fn.name === 'get_record_fields') {
                         toolResult = executeGetRecordSchema(fn.args.record_type);
-                        // Append to history and continue loop so LLM can read schema
                         conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
                         log.debug('Agent 2 Loop', 'Fetched schema for ' + fn.args.record_type);
                     } 
                     else if (fn.name === 'create_saved_search') {
-                        // Ensure it's a string before passing to executor
                         let jsonConfigStr = typeof fn.args.json_config === 'string' ? fn.args.json_config : JSON.stringify(fn.args.json_config);
-                        return executeCreateSearch(jsonConfigStr); // End execution
+                        return executeCreateSearch(jsonConfigStr); 
                     } 
                     else if (fn.name === 'run_suiteql') {
-                        return executeSuiteQL(fn.args.query); // End execution
+                        return executeSuiteQL(fn.args.query); 
                     } 
                     else {
                         return "Error: Unknown Tool " + fn.name;
@@ -159,7 +149,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     return "Execution Error during " + fn.name + ": " + e.message;
                 }
             } else {
-                // LLM decided to return standard text instead of a tool
                 return decision.text || decision || "Agent 2 determined no action was required.";
             }
         }
@@ -234,12 +223,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
         let resBody = JSON.parse(response.body);
         let candidate = resBody.candidates[0].content.parts[0];
 
-        // If tools were provided, check if the model invoked one natively
         if (tools) {
             return candidate.functionCall ? { functionCall: candidate.functionCall } : { text: candidate.text };
         } 
         
-        // Otherwise, return pure text
         return candidate.text;
     }
 
@@ -265,7 +252,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function executeGetRecordSchema(recordType) {
         try {
-            // Creates a dynamic dummy record just to fetch the available internal field IDs
             let dummyRec = record.create({ type: recordType, isDynamic: true });
             let fields = dummyRec.getFields();
             
@@ -288,6 +274,34 @@ function(query, https, serverWidget, runtime, log, record, search) {
         try {
             let extracted = extractJSON(jsonConfigString);
             searchConfig = JSON.parse(extracted);
+            
+            // SANITIZATION LAYER
+            // Automatically correct the AI if it hallucinated 'field' instead of 'name'
+            if (Array.isArray(searchConfig.filters)) {
+                searchConfig.filters = searchConfig.filters.map(f => {
+                    if (Array.isArray(f)) return f; // Allow standard NetSuite filter expressions
+                    if (typeof f === 'object' && f !== null) {
+                        if (f.field && !f.name) f.name = f.field;
+                        if (f.id && !f.name) f.name = f.id;
+                        if (f.value !== undefined && f.values === undefined) {
+                            f.values = Array.isArray(f.value) ? f.value : [f.value];
+                            delete f.value;
+                        }
+                    }
+                    return f;
+                });
+            }
+
+            // Clean up columns if the AI tried to pass objects instead of strings
+            if (Array.isArray(searchConfig.columns)) {
+                searchConfig.columns = searchConfig.columns.map(c => {
+                    if (typeof c === 'object' && c !== null && c.field && !c.name) {
+                        c.name = c.field;
+                    }
+                    return c;
+                });
+            }
+
         } catch (e) {
             log.error('Execution Error: JSON Parse', "Failed to parse: " + jsonConfigString);
             return "Execution Error: AI provided invalid JSON format for the search criteria.";
@@ -312,7 +326,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
         } catch (e) {
             log.error('Search Creation Rejected', e.message + " | Payload: " + JSON.stringify(searchConfig));
-            return "Execution Error: NetSuite rejected the search criteria. This is usually due to the AI guessing an incorrect field name or filter operator. Details: " + e.message;
+            return "Execution Error: NetSuite rejected the search criteria. Details: " + e.message;
         }
     }
 
@@ -331,7 +345,8 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 6. UI RENDERER 
     // ========================================================================
     function renderUI(context) {
-        const form = serverWidget.createForm({ title: 'NetSuite AI MAS: Search Auto-Creator' });
+        // Changed title from "NetSuite AI MAS" to "NetSuite AI assistance"
+        const form = serverWidget.createForm({ title: 'NetSuite AI assistance: Search Auto-Creator' });
         const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
         
         htmlField.defaultValue = `
@@ -353,7 +368,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
             </div>
             <div class="input-area">
                 <input type="text" id="user-input" placeholder="Example: Create a saved search for customers in California..." onkeydown="if(event.key === 'Enter') sendMessage()">
-                <button id="send-btn" onclick="sendMessage()">Send to MAS</button>
+                <button id="send-btn" onclick="sendMessage()">Send to AI assistance</button>
             </div>
             <script>
                 async function sendMessage() {
