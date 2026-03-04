@@ -7,7 +7,7 @@ define(['N/query', 'N/https', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/reco
 function(query, https, serverWidget, runtime, log, record, search) {
 
     const GEMINI_MODEL = 'gemini-2.0-flash';
-    const MAX_RETRIES = 1;
+    const MAX_PIPELINE_RETRIES = 2; // Initial attempt + 2 retries = 3 total attempts
 
     // ========================================================================
     // 1. TOOL DEFINITIONS 
@@ -108,16 +108,24 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 log.debug('Pipeline', 'Starting Agent 1 (Analysis)...');
                 let analysis = runAgent1_Analysis(userPrompt, apiKey);
                 
-                log.debug('Pipeline', 'Starting Agent 2 (Execution with Schema Check)...');
+                log.debug('Pipeline', 'Starting Agent 2 (Execution)...');
                 let executionResult = runAgent2_Execution(analysis, apiKey);
                 
                 log.debug('Pipeline', 'Starting Agent 3 (Audit)...');
                 let audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
 
-                if (!audit.satisfied) {
-                    log.audit('Pipeline Retry', 'Agent 3 failed content. Reason: ' + audit.reason);
-                    let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis + "\nIMPORTANT: Ensure you invoke the required tool to create the search or resolve the invalid column.";
+                // --- 3-ATTEMPT RETRY LOOP ---
+                let retryCount = 0;
+                while (!audit.satisfied && retryCount < MAX_PIPELINE_RETRIES) {
+                    retryCount++;
+                    log.audit('Pipeline Retry ' + retryCount, 'Reason: ' + audit.reason);
+                    
+                    let retryPrompt = "Attempt " + retryCount + " failed. Auditor Reason: " + audit.reason + "\n" +
+                                      "Original Plan:\n" + analysis + "\n" +
+                                      "CRITICAL INSTRUCTION: If the error was 'invalid column' or 'not in proper syntax', the field ID you used is WRONG for searches (even if it exists on the record browser). NetSuite Search IDs differ from Record IDs. You MUST use an alternative field ID (e.g., try 'datecreated' instead of 'createddate') or find another logical criteria to achieve the same result.";
+                                      
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
+                    audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
                 }
 
                 log.debug('Pipeline', 'Starting Agent 4 (Format)...');
@@ -128,7 +136,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
                 context.response.write(JSON.stringify({ 
                     answer: finalOutput,
-                    pipelineStats: "5 Agents Executed Successfully via Gemini API"
+                    pipelineStats: "Executed successfully via Gemini API (Retries: " + retryCount + ")"
                 }));
 
             } catch (e) {
@@ -181,9 +189,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
         const maxSteps = 4; 
         
         for (let i = 0; i < maxSteps; i++) {
-            const systemPrompt = "You are Agent 2 (Executor). Use the tools to fulfill the plan provided by Agent 1. \n" +
-                                 "CRITICAL RULE 1: You MUST invoke the 'create_saved_search' tool to actually create the search. Do NOT just output conversational text describing what you are going to do.\n" +
-                                 "CRITICAL RULE 2: Ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values' properties.";
+            const systemPrompt = "You are Agent 2 (Executor). Use the tools to fulfill the plan. \n" +
+                                 "CRITICAL RULE 1: You MUST invoke the 'create_saved_search' tool to actually create the search. Do NOT just output conversational text.\n" +
+                                 "CRITICAL RULE 2: Ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values'.\n" +
+                                 "CRITICAL RULE 3: If you are retrying because of an 'invalid column' or 'syntax' error, DO NOT use the exact same field ID again. Try an alternative Search ID (e.g., 'datecreated' instead of 'createddate') or find another way.";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, TOOLS_SCHEMA);
             
@@ -214,7 +223,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     return "Execution Error during " + fn.name + ": " + e.message;
                 }
             } else {
-                // If Agent 2 tries to output text instead of clicking the tool, force it back.
                 let outputText = decision.text || "";
                 if (i < maxSteps - 1) {
                     conversationHistory += "\n\nAI Output: " + outputText + "\nSystem Instruction: You did not call a tool. You MUST invoke the 'create_saved_search' tool to complete the task. Do not just return text.";
@@ -230,8 +238,8 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent3_Audit(originalPrompt, resultData, key) {
         const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
-                             "1. If the Execution Result does NOT contain 'status: Success' or an internal ID, return satisfied: false and reason: 'Tool was not executed. You must call the create_saved_search tool.'\n" +
-                             "2. If the Execution Result mentions 'invalid column' or 'search.createColumn', return satisfied: false and instruct Agent 2 to use the 'fetch_online_schema' tool.\n" +
+                             "1. If the Execution Result does NOT contain 'status: Success' or an internal ID, return satisfied: false.\n" +
+                             "2. If the Execution Result contains 'invalid column', 'not in proper syntax', or 'search.createColumn', return satisfied: false and explicitly output this reason: 'NetSuite rejected a column/filter. Search IDs often differ from Record IDs (e.g., datecreated vs createddate). Try an alternative field ID or a different logical approach.'\n" +
                              "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }.";
         
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
@@ -249,6 +257,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
         const systemPrompt = "You are Agent 4 (Designer). Convert this raw execution text into HTML. \n" +
                              "ALWAYS wrap your entire response in a <div> tag. \n" +
                              "If the raw data contains a success message and a relative link, create an active HTML <a> tag for it. \n" +
+                             "If it is an error message, format it clearly so the user understands the pipeline failed after 3 attempts.\n" +
                              "CRITICAL: Output ONLY valid HTML code. Do NOT include markdown blocks like ```html.";
         
         let rawHtml = callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
@@ -296,7 +305,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
         let resBody = JSON.parse(response.body);
         let parts = resBody.candidates[0].content.parts;
         
-        // Loop through all parts to ensure we catch the function call even if it generated text too
         let funcCall = null;
         let textResult = "";
         
