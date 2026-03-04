@@ -1,50 +1,66 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType Suitelet
- * @Description NetSuite AI Assistance - PDF Generator (BFO XML) via Multi-Agent System
+ * @Description NetSuite AI Assistance - Transaction Creator (Manually Fed / OCR Text)
  */
-define(['N/query', 'N/https', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/render', 'N/file', 'N/search'], 
-function(query, https, serverWidget, runtime, log, render, file, search) {
+define(['N/query', 'N/https', 'N/ui/serverWidget', 'N/runtime', 'N/log', 'N/record', 'N/search'], 
+function(query, https, serverWidget, runtime, log, record, search) {
 
     const GEMINI_MODEL = 'gemini-2.0-flash';
-    const MAX_PIPELINE_RETRIES = 2; // Allows 3 total attempts to fix XML parsing errors
+    const MAX_PIPELINE_RETRIES = 2; // Allows 3 total attempts to fix missing fields or invalid IDs
+
+    // Helper: Formats today's date for AI context
+    function getTodayString() {
+        const d = new Date();
+        return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+    }
 
     // ========================================================================
-    // 1. TOOL DEFINITIONS (PDF Generation Focused)
+    // 1. TOOL DEFINITIONS (Transaction Creation Focused)
     // ========================================================================
     
     const ANALYST_TOOLS_SCHEMA = [
         {
-            name: "get_bfo_xml_reference",
-            description: "Acts as the NetSuite Help Center guide for valid BFO (Big Faceless Organization) XML rules. MUST use this to understand the strict XML layout constraints before planning the PDF structure.",
-            parameters: { type: "OBJECT", properties: {} }
+            name: "get_record_fields",
+            description: "Fetches valid NetSuite internal body AND sublist field IDs for a given record type.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record (e.g., 'salesorder', 'vendorbill', 'journalentry')." }
+                },
+                required: ["record_type"]
+            }
+        },
+        {
+            name: "run_suiteql",
+            description: "Executes SuiteQL queries. MUST use this to verify if Entities (Customers/Vendors) or Items exist and to find their internal IDs.",
+            parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] }
         }
     ];
 
     const TOOLS_SCHEMA = [
         {
-            name: "get_bfo_xml_reference",
-            description: "Returns the NetSuite strict rules for BFO XML formatting. Use to prevent SAX Parsing errors.",
-            parameters: { type: "OBJECT", properties: {} }
+            name: "get_record_fields",
+            description: "Fetches valid NetSuite internal body AND sublist field IDs for a given record type.",
+            parameters: { type: "OBJECT", properties: { record_type: { type: "STRING" } }, required: ["record_type"] }
         },
         {
             name: "run_suiteql",
-            description: "Executes SuiteQL to fetch raw data. Use this if the user asks to populate the PDF with actual data from NetSuite (e.g., fetching a specific Invoice or Customer).",
+            description: "Executes SuiteQL to fetch Internal IDs. NetSuite records CANNOT be created using names; you MUST look up internal IDs for entities, items, terms, etc.",
             parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] }
         },
         {
-            name: "create_pdf_document",
-            description: "Compiles the BFO XML string into a PDF file in NetSuite and saves it to the File Cabinet.",
+            name: "create_transaction_record",
+            description: "Creates a NetSuite Transaction record dynamically.",
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    file_name: { type: "STRING", description: "The name of the PDF file (e.g., 'Monthly_Report.pdf')." },
-                    bfo_xml_content: { 
+                    json_config: { 
                         type: "STRING", 
-                        description: "The COMPLETE, strictly valid XML string. Must begin with <?xml version=\"1.0\"?> and the root tag must be <pdf>. All HTML tags must be properly closed." 
+                        description: "A stringified JSON object. Structure MUST be: { \"recordType\": \"salesorder\", \"bodyFields\": { \"entity\": 1234, \"trandate\": \"03/04/2026\" }, \"sublists\": { \"item\": [ { \"item\": 5678, \"quantity\": 2, \"rate\": 100 } ] } }. ALWAYS use internal IDs (numbers) for select fields, never text names." 
                     }
                 },
-                required: ["file_name", "bfo_xml_content"]
+                required: ["json_config"]
             }
         }
     ];
@@ -77,14 +93,14 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
                 log.debug('Pipeline', 'Starting Agent 3 (Audit)...');
                 let audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
 
-                // --- 3-ATTEMPT RETRY LOOP (Crucial for fixing XML syntax errors) ---
+                // --- 3-ATTEMPT RETRY LOOP (Crucial for missing required fields & invalid IDs) ---
                 let retryCount = 0;
                 while (!audit.satisfied && retryCount < MAX_PIPELINE_RETRIES) {
                     retryCount++;
                     log.audit('Pipeline Retry ' + retryCount, 'Reason: ' + audit.reason);
                     
                     let retryPrompt = "Attempt " + retryCount + " failed. Auditor Reason: " + audit.reason + "\n" +
-                                      "CRITICAL INSTRUCTION: Read the auditor reason carefully. If the error was a SAXParseException, your XML is invalid. You MUST fix unclosed tags (like <img>, <br>, or <hr>), escape ampersands (&amp;), and ensure you are strictly following the BFO XML standard.";
+                                      "CRITICAL INSTRUCTION: Read the error carefully. If you missed a required field, use 'get_record_fields' to find its ID and add it. If you used an invalid reference (like a text string instead of an Internal ID), use 'run_suiteql' to search for the correct numeric internal ID.";
                                       
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                     audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
@@ -98,7 +114,7 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
 
                 context.response.write(JSON.stringify({ 
                     answer: finalOutput,
-                    pipelineStats: "PDF Generation Pipeline Executed (Retries: " + retryCount + ")"
+                    pipelineStats: "Transaction Creation Pipeline Executed (Retries: " + retryCount + ")"
                 }));
 
             } catch (e) {
@@ -113,22 +129,29 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
     // ========================================================================
 
     function runAgent1_Analysis(prompt, key) {
-        let conversationHistory = "User Request:\n" + prompt;
+        let conversationHistory = "Raw Data/Prompt:\n" + prompt;
         const maxSteps = 3; 
         
         for (let i = 0; i < maxSteps; i++) {
-            const systemPrompt = "You are Agent 1 (Analyst). Analyze the user's PDF layout request. \n" +
-                                 "CRITICAL RULE: You MUST call 'get_bfo_xml_reference' FIRST to understand NetSuite's strict PDF generation constraints.\n" +
-                                 "Once you understand the layout rules, write a plain-text instruction manual for Agent 2 detailing exactly how to structure the XML/HTML elements to achieve the user's design. Do NOT output the raw XML yourself.";
+            const systemPrompt = "You are Agent 1 (Data Analyst). Extract transaction details from the user's raw text/OCR data. \n" +
+                                 "Today's Date is: " + getTodayString() + ". \n" +
+                                 "CRITICAL RULES:\n" +
+                                 "1. Identify the Record Type (e.g., salesorder, vendorbill, journalentry).\n" +
+                                 "2. Extract Entity names (Customers/Vendors) and Item names. NetSuite strictly requires their numeric INTERNAL IDs to create records.\n" +
+                                 "3. You MUST instruct Agent 2 to use the 'run_suiteql' tool to look up the Internal IDs for these names (e.g., 'SELECT id FROM customer WHERE companyname LIKE...').\n" +
+                                 "Write a plain-text instruction manual for Agent 2 detailing what internal IDs to lookup and the exact JSON structure to build. Do NOT execute JSON yourself.";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, ANALYST_TOOLS_SCHEMA);
             
             if (decision.functionCall) {
                 const fn = decision.functionCall;
                 try {
-                    if (fn.name === 'get_bfo_xml_reference') {
-                        let toolResult = executeGetBfoReference();
-                        conversationHistory += "\n\nTool 'get_bfo_xml_reference' executed. Rules:\n" + toolResult;
+                    if (fn.name === 'get_record_fields') {
+                        let toolResult = executeGetRecordSchema(fn.args.record_type);
+                        conversationHistory += "\n\nTool 'get_record_fields' executed. Schema:\n" + toolResult;
+                    } else if (fn.name === 'run_suiteql') {
+                        let toolResult = executeSuiteQL(fn.args.query);
+                        conversationHistory += "\n\nTool 'run_suiteql' executed. Result:\n" + toolResult;
                     } else {
                         conversationHistory += "\n\nError: Unknown Tool " + fn.name;
                     }
@@ -144,13 +167,13 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
 
     function runAgent2_Execution(planFromAgent1, key) {
         let conversationHistory = "Plan to execute:\n" + planFromAgent1;
-        const maxSteps = 4; 
+        const maxSteps = 5; 
         
         for (let i = 0; i < maxSteps; i++) {
-            const systemPrompt = "You are Agent 2 (Executor). Use the tools to generate the requested PDF. \n" +
-                                 "CRITICAL RULE 1: You MUST invoke 'create_pdf_document' to actually create the file. Do not just output the XML code as text.\n" +
-                                 "CRITICAL RULE 2: If the plan requires dynamic data, use 'run_suiteql' to fetch it first.\n" +
-                                 "CRITICAL RULE 3: Your XML must be flawless. Ensure all tags are closed (e.g., <br/> instead of <br>) to avoid SAX parse errors.";
+            const systemPrompt = "You are Agent 2 (Executor). Follow Agent 1's plan to create a transaction. \n" +
+                                 "CRITICAL RULE 1: NEVER guess Internal IDs. Use 'run_suiteql' to search for Entities, Items, Locations, or Terms if you don't know their exact numeric ID.\n" +
+                                 "CRITICAL RULE 2: Date fields MUST be formatted as 'MM/DD/YYYY'.\n" +
+                                 "CRITICAL RULE 3: Once you have ALL the correct Internal IDs, invoke 'create_transaction_record' to push the data into NetSuite.";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, TOOLS_SCHEMA);
             
@@ -159,16 +182,18 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
                 let toolResult = "";
                 
                 try {
-                    if (fn.name === 'get_bfo_xml_reference') {
-                        toolResult = executeGetBfoReference();
-                        conversationHistory += "\n\nTool 'get_bfo_xml_reference' executed. Rules:\n" + toolResult;
-                    }
-                    else if (fn.name === 'create_pdf_document') {
-                        return executeCreatePdf(fn.args.file_name, fn.args.bfo_xml_content); 
+                    if (fn.name === 'get_record_fields') {
+                        toolResult = executeGetRecordSchema(fn.args.record_type);
+                        conversationHistory += "\n\nTool 'get_record_fields' executed. Schema:\n" + toolResult;
                     } 
                     else if (fn.name === 'run_suiteql') {
                         toolResult = executeSuiteQL(fn.args.query); 
                         conversationHistory += "\n\nTool 'run_suiteql' executed. Data:\n" + toolResult;
+                        log.debug('Agent 2 Lookups', 'Executed QL: ' + fn.args.query);
+                    } 
+                    else if (fn.name === 'create_transaction_record') {
+                        let jsonConfigStr = typeof fn.args.json_config === 'string' ? fn.args.json_config : JSON.stringify(fn.args.json_config);
+                        return executeCreateTransaction(jsonConfigStr); 
                     } 
                     else {
                         return "Error: Unknown Tool " + fn.name;
@@ -179,7 +204,7 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
             } else {
                 let outputText = decision.text || "";
                 if (i < maxSteps - 1) {
-                    conversationHistory += "\n\nAI Output: " + outputText + "\nSystem Instruction: You MUST invoke the 'create_pdf_document' tool to compile the XML into a PDF.";
+                    conversationHistory += "\n\nAI Output: " + outputText + "\nSystem Instruction: You MUST invoke the 'create_transaction_record' tool to finalize the creation.";
                     continue;
                 } else {
                     return outputText || "Agent 2 failed to execute a tool.";
@@ -191,12 +216,13 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
     }
 
     function runAgent3_Audit(originalPrompt, resultData, key) {
-        const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
+        const systemPrompt = "You are Agent 3 (Auditor). Compare the Execution Result with NetSuite's strict API rules. \n" +
                              "1. If the Execution Result does NOT contain 'status: Success', return satisfied: false.\n" +
-                             "2. If the Execution Result contains 'SAXParseException' or 'XML parsing failed', return satisfied: false and explicitly output the exact error message so Agent 2 can fix its XML syntax.\n" +
+                             "2. If the Execution Result contains errors like 'Please enter value(s) for', return satisfied: false and instruct Agent 2 to add the missing required fields.\n" +
+                             "3. If the Execution Result contains 'Invalid reference' or 'Invalid internal ID', return satisfied: false and explicitly tell Agent 2 it MUST use 'run_suiteql' to look up the correct numeric ID instead of using a text string.\n" +
                              "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }.";
         
-        const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
+        const content = "Execution Result: " + resultData;
         const responseText = callGemini(systemPrompt + "\n\n" + content, key);
         
         try {
@@ -210,8 +236,8 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
     function runAgent4_Format(rawData, key) {
         const systemPrompt = "You are Agent 4 (Designer). Convert this raw execution text into HTML. \n" +
                              "ALWAYS wrap your entire response in a <div> tag. \n" +
-                             "If the raw data contains a success message and a NetSuite relative link, create a large, prominent active HTML <a> tag button for downloading the PDF. \n" +
-                             "If it is an error message, format it clearly.\n" +
+                             "If the transaction was created successfully, extract the Internal ID from the raw data and display a bright success message.\n" +
+                             "If it is an error message, format it clearly so the user understands what data was missing or invalid.\n" +
                              "CRITICAL: Output ONLY valid HTML code. Do NOT include markdown blocks like ```html.";
         
         let rawHtml = callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
@@ -258,22 +284,18 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
 
         let resBody = JSON.parse(response.body);
 
-        // --- NEW SAFETY CHECK ADDED HERE ---
         if (!resBody.candidates || !resBody.candidates[0]) {
-            throw new Error("Invalid API Response: Missing candidates block. Full response: " + response.body);
+            throw new Error("Invalid API Response: Missing candidates block.");
         }
 
         let candidate = resBody.candidates[0];
 
-        // Sometimes the Gemini API trips a safety filter (especially with emails/names from SuiteQL)
-        // When this happens, it omits the "content" entirely and just sends a finishReason.
         if (!candidate.content || !candidate.content.parts) {
             throw new Error("Gemini API omitted content parts. Finish Reason: " + (candidate.finishReason || 'Unknown'));
         }
 
         let parts = candidate.content.parts;
-        // ------------------------------------
-
+        
         let funcCall = null;
         let textResult = "";
         
@@ -310,89 +332,119 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
-    function executeGetBfoReference() {
-        return `
-        NETSUITE BFO XML STRICT REFERENCE GUIDE:
-        
-        1. STRUCTURE: The document MUST begin with exactly: <?xml version="1.0"?>
-           The root tag MUST be <pdf>. Inside <pdf>, you MUST have <head> and <body>.
-           Example: 
-           <?xml version="1.0"?>
-           <pdf>
-             <head>
-               <style> body { font-family: Helvetica; font-size: 10pt; } th { font-weight: bold; } </style>
-             </head>
-             <body>
-               <h1>Report</h1>
-             </body>
-           </pdf>
-           
-        2. STRICT HTML RULES (SAX Parsing):
-           - ALL tags must be explicitly closed. <br> will cause a crash. You MUST use <br/>.
-           - <img> must be <img />. <hr> must be <hr/>.
-           - Ampersands must be escaped as &amp;.
-           
-        3. LAYOUT RESTRICTIONS:
-           - CSS Flexbox (display: flex) and Grid (display: grid) DO NOT WORK in BFO. 
-           - To create multi-column layouts, you MUST use HTML <table>, <tr>, and <td> tags.
-           - CSS properties like 'float' are highly unreliable. Use Tables for alignment.
-        `;
+    function executeGetRecordSchema(recordType) {
+        try {
+            let dummyRec = record.create({ type: recordType, isDynamic: true });
+            let bodyFields = dummyRec.getFields();
+            let availableSublists = dummyRec.getSublists();
+            
+            let schema = { 
+                status: "Success", 
+                recordType: recordType, 
+                bodyFields: bodyFields, 
+                sublists: {} 
+            };
+            
+            // To prevent massive token payloads, we only expose the most common transaction sublists to the AI
+            ['item', 'expense', 'line'].forEach(sub => {
+                if (availableSublists.includes(sub)) {
+                    schema.sublists[sub] = dummyRec.getSublistFields({ sublistId: sub });
+                }
+            });
+
+            return JSON.stringify(schema);
+        } catch (e) {
+            return JSON.stringify({ status: "Error", message: "Failed to load schema for " + recordType + ". Error: " + e.message });
+        }
     }
 
     function executeSuiteQL(q) {
         try {
             let cleanQuery = q.replace(/```sql/gi,'').replace(/```/g,'').trim();
             let res = query.runSuiteQL({ query: cleanQuery });
-            let rows = res.asMappedResults().slice(0, 50); // Cap at 50 to prevent token limits
-            return rows.length ? JSON.stringify(rows) : "No records found.";
+            let rows = res.asMappedResults().slice(0, 50); 
+            return rows.length ? JSON.stringify(rows) : "No records found matching your query.";
         } catch(e) {
             return "SuiteQL Error: " + e.message;
         }
     }
 
-    function executeCreatePdf(fileName, xmlContent) {
-        let fileId = null;
+    function executeCreateTransaction(jsonConfigString) {
+        let config;
         try {
-            // Clean up common AI markdown hallucinations
-            let cleanXml = xmlContent.replace(/```xml/gi, "").replace(/```html/gi, "").replace(/```/g, "").trim();
+            let extracted = extractJSON(jsonConfigString);
+            config = JSON.parse(extracted);
+        } catch (e) {
+            return "Execution Error: AI provided invalid JSON format for the transaction config.";
+        }
+
+        try {
+            log.debug('MAS Transaction Creation', 'Attempting creation for: ' + config.recordType);
             
-            // Safety enforcement: Ensure basic XML structure exists
-            if (!cleanXml.startsWith('<?xml')) {
-                cleanXml = '<?xml version="1.0"?>\n' + cleanXml;
-            }
-            if (!cleanXml.includes('<pdf>')) {
-                cleanXml = cleanXml.replace('<body>', '<pdf>\n<body>').replace('</body>', '</body>\n</pdf>');
+            // Initialize the dynamic record
+            let rec = record.create({ type: config.recordType, isDynamic: true });
+
+            // 1. Set Body Fields
+            if (config.bodyFields && typeof config.bodyFields === 'object') {
+                for (let fieldId in config.bodyFields) {
+                    try {
+                        let val = config.bodyFields[fieldId];
+                        
+                        // NetSuite is strict about Date objects vs Strings.
+                        // If the AI passes a string like "03/04/2026", we use setText to let NetSuite parse it safely.
+                        if (typeof val === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val)) {
+                            rec.setText({ fieldId: fieldId, text: val });
+                        } else {
+                            rec.setValue({ fieldId: fieldId, value: val });
+                        }
+                    } catch (e) {
+                        log.error('MAS Set Field Error', 'Failed on Body Field [' + fieldId + ']: ' + e.message);
+                    }
+                }
             }
 
-            log.debug('MAS PDF Generation', 'Executing render.xmlToPdf...');
-            
-            let pdfFile = render.xmlToPdf({ xmlString: cleanXml });
-            pdfFile.name = fileName.endsWith('.pdf') ? fileName : fileName + '.pdf';
-            
-            // Locate a safe top-level folder to store the PDF (Fallback to root if none found)
-            let folderSearch = search.create({
-                type: 'folder',
-                filters: [['istoplevel', 'is', 'T'], 'AND', ['isinactive', 'is', 'F']],
-                columns: ['internalid']
-            }).run().getRange({ start: 0, end: 1 });
-
-            if (folderSearch && folderSearch.length > 0) {
-                pdfFile.folder = folderSearch[0].id;
+            // 2. Set Sublists (Items, Expenses, Journal Lines, etc.)
+            if (config.sublists && typeof config.sublists === 'object') {
+                for (let sublistId in config.sublists) {
+                    let lines = config.sublists[sublistId];
+                    if (Array.isArray(lines)) {
+                        for (let i = 0; i < lines.length; i++) {
+                            rec.selectNewLine({ sublistId: sublistId });
+                            
+                            for (let lineFieldId in lines[i]) {
+                                try {
+                                    let val = lines[i][lineFieldId];
+                                    if (typeof val === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val)) {
+                                        rec.setCurrentSublistText({ sublistId: sublistId, fieldId: lineFieldId, text: val });
+                                    } else {
+                                        rec.setCurrentSublistValue({ sublistId: sublistId, fieldId: lineFieldId, value: val });
+                                    }
+                                } catch (e) {
+                                    log.error('MAS Set Sublist Error', 'Failed on Line Field [' + lineFieldId + ']: ' + e.message);
+                                }
+                            }
+                            rec.commitLine({ sublistId: sublistId });
+                        }
+                    }
+                }
             }
 
-            fileId = pdfFile.save();
-            let savedFile = file.load({ id: fileId });
+            // 3. Save the Record
+            let savedId = rec.save();
+
+            // Provide a generic NetSuite URL redirect string so the user can easily view it
+            const genericUrl = '/app/accounting/transactions/transaction.nl?id=' + savedId;
 
             return JSON.stringify({
                 status: "Success",
-                message: "Created PDF Document: " + pdfFile.name,
-                internalId: fileId,
-                link: savedFile.url
+                message: "Created " + config.recordType.toUpperCase() + " successfully.",
+                internalId: savedId,
+                link: genericUrl
             });
 
         } catch (e) {
-            log.error('PDF Generation Rejected', e.message + " | Payload Preview: " + xmlContent.substring(0, 500));
-            return "Execution Error: XML parsing failed. NetSuite rejected the layout. Details: " + e.message;
+            log.error('Transaction Creation Rejected', e.message + " | Payload: " + JSON.stringify(config));
+            return "Execution Error: NetSuite rejected the transaction. Details: " + e.message;
         }
     }
 
@@ -400,7 +452,7 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
     // 6. UI RENDERER 
     // ========================================================================
     function renderUI(context) {
-        const form = serverWidget.createForm({ title: 'NetSuite AI Assistance: PDF Layout Generator' });
+        const form = serverWidget.createForm({ title: 'NetSuite AI Assistance: Transaction Auto-Creator' });
         const htmlField = form.addField({ id: 'custpage_html', type: 'inlinehtml', label: 'HTML' });
         
         htmlField.defaultValue = `
@@ -412,18 +464,18 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
                 .error-msg { color: #d93025; background-color: #feefee; border: 1px solid #fad2cf; padding: 12px; border-radius: 8px; margin: 10px 0; clear: both; font-family: monospace; font-size: 12px; }
                 .loader { font-style: italic; color: #5f6368; margin: 10px 0; clear: both; }
                 .input-area { display: flex; gap: 10px; clear: both; }
-                input[type="text"] { flex-grow: 1; padding: 12px; border: 1px solid #dadce0; border-radius: 24px; outline: none; padding-left: 20px; }
-                button { padding: 12px 25px; cursor: pointer; background: #1a73e8; color: white; border: none; border-radius: 24px; font-weight: bold; transition: background 0.2s; }
+                textarea { flex-grow: 1; padding: 12px; border: 1px solid #dadce0; border-radius: 12px; outline: none; resize: vertical; min-height: 50px; }
+                button { padding: 12px 25px; cursor: pointer; background: #1a73e8; color: white; border: none; border-radius: 24px; font-weight: bold; transition: background 0.2s; align-self: flex-end; margin-bottom: 5px; }
                 button:hover { background: #1557b0; }
                 a { color: #1a73e8; text-decoration: none; font-weight: 600; padding: 8px 15px; border: 1px solid #1a73e8; border-radius: 6px; display: inline-block; margin-top: 5px; }
                 a:hover { background-color: #f1f8ff; }
             </style>
             <div id="chat-box">
-                <div class="ai-msg">I am NetSuite AI. My Multi-Agent Pipeline is now configured for BFO PDF Generation. Describe the layout you need!</div>
+                <div class="ai-msg">I am NetSuite AI. My Multi-Agent Pipeline is now configured to create Transactions. You can paste raw OCR text, email bodies, or type out the transaction details!</div>
             </div>
             <div class="input-area">
-                <input type="text" id="user-input" placeholder="Example: Create a Monthly Expense PDF with a table showing Date, Item, and Amount..." onkeydown="if(event.key === 'Enter') sendMessage()">
-                <button id="send-btn" onclick="sendMessage()">Generate PDF</button>
+                <textarea id="user-input" placeholder="Example: Create a Sales Order for customer 'Aethna Corp'. Add 2 'Apple iPads' at $500 each and set the memo to 'Rush Order'." onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }"></textarea>
+                <button id="send-btn" onclick="sendMessage()">Create Transaction</button>
             </div>
             <script>
                 async function sendMessage() {
@@ -433,12 +485,12 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
                     var msg = input.value.trim();
                     if(!msg) return;
 
-                    box.innerHTML += '<div class="user-msg">' + msg.replace(/</g, "&lt;") + '</div>';
+                    box.innerHTML += '<div class="user-msg">' + msg.replace(/</g, "&lt;").replace(/\\n/g, "<br>") + '</div>';
                     input.value = '';
                     input.disabled = true; btn.disabled = true;
                     
                     var loadingId = 'loading-' + Date.now();
-                    box.innerHTML += '<div id="' + loadingId + '" class="loader">Executing Pipeline: Analysis -> Layout Generation -> PDF Compilation -> Syntax Audit -> Format...</div>';
+                    box.innerHTML += '<div id="' + loadingId + '" class="loader">Executing Pipeline: Parsing Data -> SQL ID Lookups -> Compiling JSON -> NetSuite Execution...</div>';
                     box.scrollTop = box.scrollHeight;
 
                     try {
