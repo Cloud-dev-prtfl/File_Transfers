@@ -9,6 +9,12 @@ function(query, https, serverWidget, runtime, log, record, search) {
     const GEMINI_MODEL = 'gemini-2.0-flash';
     const MAX_PIPELINE_RETRIES = 2; // Initial attempt + 2 retries = 3 total attempts
 
+    // Helper to get consistent MM/DD/YYYY date for the AI
+    function getTodayString() {
+        const d = new Date();
+        return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+    }
+
     // ========================================================================
     // 1. TOOL DEFINITIONS 
     // ========================================================================
@@ -31,7 +37,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up (e.g., 'invoice', 'customer')." }
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up." }
                 },
                 required: ["record_type"]
             }
@@ -40,6 +46,17 @@ function(query, https, serverWidget, runtime, log, record, search) {
             name: "get_netsuite_search_reference",
             description: "Acts as the NetSuite Help Center guide for valid Search Criteria, Quick Filters (Relative Dates), and Status IDs. MUST use this if the request involves dates, timeframes, or transaction statuses.",
             parameters: { type: "OBJECT", properties: {} }
+        },
+        {
+            name: "search_web_examples",
+            description: "Searches StackOverflow and the web for working NetSuite saved search examples. Use this to find correct criteria logic for complex user requests.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    search_query: { type: "STRING", description: "The specific NetSuite search topic to look up (e.g., 'customer open invoices saved search', 'date between filter')." }
+                },
+                required: ["search_query"]
+            }
         }
     ];
 
@@ -47,29 +64,22 @@ function(query, https, serverWidget, runtime, log, record, search) {
         {
             name: "get_record_fields",
             description: "Fetches valid NetSuite internal body field IDs for a given record type.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record." }
-                },
-                required: ["record_type"]
-            }
+            parameters: { type: "OBJECT", properties: { record_type: { type: "STRING" } }, required: ["record_type"] }
         },
         {
             name: "fetch_online_schema",
             description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns'.",
-            parameters: {
-                type: "OBJECT",
-                properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record." }
-                },
-                required: ["record_type"]
-            }
+            parameters: { type: "OBJECT", properties: { record_type: { type: "STRING" } }, required: ["record_type"] }
         },
         {
             name: "get_netsuite_search_reference",
             description: "Returns the NetSuite Help Center rules for valid Quick Date filters and Status IDs. Use to prevent invalid criteria errors.",
             parameters: { type: "OBJECT", properties: {} }
+        },
+        {
+            name: "search_web_examples",
+            description: "Searches the web for working NetSuite saved search code snippets.",
+            parameters: { type: "OBJECT", properties: { search_query: { type: "STRING" } }, required: ["search_query"] }
         },
         {
             name: "create_saved_search",
@@ -88,11 +98,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
         {
             name: "run_suiteql",
             description: "Executes SuiteQL to fetch raw data.",
-            parameters: {
-                type: "OBJECT",
-                properties: { query: { type: "STRING", description: "The SQL query string." } },
-                required: ["query"]
-            }
+            parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] }
         }
     ];
 
@@ -124,7 +130,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 log.debug('Pipeline', 'Starting Agent 3 (Audit)...');
                 let audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
 
-                // --- 3-ATTEMPT RETRY LOOP ---
                 let retryCount = 0;
                 while (!audit.satisfied && retryCount < MAX_PIPELINE_RETRIES) {
                     retryCount++;
@@ -132,7 +137,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                     
                     let retryPrompt = "Attempt " + retryCount + " failed. Auditor Reason: " + audit.reason + "\n" +
                                       "Original Plan:\n" + analysis + "\n" +
-                                      "CRITICAL INSTRUCTION: If the error was related to an 'invalid column', try an alternative field ID (e.g., 'datecreated' instead of 'createddate'). If the error was related to date strings or statuses, use the 'get_netsuite_search_reference' tool to find the exact allowed values.";
+                                      "CRITICAL INSTRUCTION: Read the auditor reason carefully. If the error was related to an 'invalid column', try an alternative field ID (e.g., 'datecreated' instead of 'createddate'). If it was related to dates, ensure you are passing EXACT MM/DD/YYYY arrays for unsupported timeframes.";
                                       
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                     audit = runAgent3_Audit(userPrompt, executionResult, apiKey);
@@ -162,13 +167,14 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent1_Analysis(prompt, key) {
         let conversationHistory = "User Request:\n" + prompt;
-        const maxSteps = 4; 
+        const maxSteps = 5; 
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 1 (Analyst). Analyze the user request. \n" +
-                                 "CRITICAL RULE 1: If the request involves dates (e.g., 'last two weeks') or statuses (e.g., 'open invoices'), you MUST call 'get_netsuite_search_reference' to validate the exact allowed values. Do not hallucinate NetSuite date strings or status IDs.\n" +
+                                 "Today's Date is: " + getTodayString() + ". \n" +
+                                 "CRITICAL RULE 1: If the request involves complex filters, dates, or statuses, use 'search_web_examples' and 'get_netsuite_search_reference' FIRST.\n" +
                                  "CRITICAL RULE 2: Use 'fetch_online_schema' to find columns and fields.\n" +
-                                 "Once you have the validated schema, output a plain-text execution plan for Agent 2. Do NOT output JSON.";
+                                 "Once you have the validated schema and examples, output a plain-text execution plan for Agent 2. Do NOT output JSON.";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, ANALYST_TOOLS_SCHEMA);
             
@@ -177,13 +183,16 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 try {
                     if (fn.name === 'fetch_online_schema') {
                         let toolResult = executeFetchOnlineSchema(fn.args.record_type);
-                        conversationHistory += "\n\nTool 'fetch_online_schema' executed. Online Browser Data:\n" + toolResult;
+                        conversationHistory += "\n\nTool 'fetch_online_schema' executed. Data:\n" + toolResult;
                     } else if (fn.name === 'get_record_fields') {
                         let toolResult = executeGetRecordSchema(fn.args.record_type);
-                        conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
+                        conversationHistory += "\n\nTool 'get_record_fields' executed. Data:\n" + toolResult;
                     } else if (fn.name === 'get_netsuite_search_reference') {
                         let toolResult = executeGetSearchReference();
-                        conversationHistory += "\n\nTool 'get_netsuite_search_reference' executed. Reference Guide:\n" + toolResult;
+                        conversationHistory += "\n\nTool 'get_netsuite_search_reference' executed. Guide:\n" + toolResult;
+                    } else if (fn.name === 'search_web_examples') {
+                        let toolResult = executeSearchWebExamples(fn.args.search_query);
+                        conversationHistory += "\n\nTool 'search_web_examples' executed. Examples:\n" + toolResult;
                     } else {
                         conversationHistory += "\n\nError: Unknown Tool " + fn.name;
                     }
@@ -199,13 +208,14 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent2_Execution(planFromAgent1, key) {
         let conversationHistory = "Plan to execute:\n" + planFromAgent1;
-        const maxSteps = 4; 
+        const maxSteps = 5; 
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 2 (Executor). Use the tools to fulfill the plan. \n" +
+                                 "Today's Date is: " + getTodayString() + ". Use this for date calculations.\n" +
                                  "CRITICAL RULE 1: You MUST invoke 'create_saved_search' to create the search. Do NOT just output text.\n" +
-                                 "CRITICAL RULE 2: If setting a Date filter or Status filter, use 'get_netsuite_search_reference' to ensure your value is actually allowed in NetSuite.\n" +
-                                 "CRITICAL RULE 3: If retrying due to an 'invalid column', do not use the exact same field ID again. Try an alternative Search ID (e.g., 'datecreated' vs 'createddate').";
+                                 "CRITICAL RULE 2: If setting a Date filter, use 'get_netsuite_search_reference' to ensure exact compliance.\n" +
+                                 "CRITICAL RULE 3: You may use 'search_web_examples' if you are unsure how to structure a specific filter.";
             
             const decision = callGemini(systemPrompt + "\n\nCurrent Context:\n" + conversationHistory, key, TOOLS_SCHEMA);
             
@@ -216,15 +226,20 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 try {
                     if (fn.name === 'get_record_fields') {
                         toolResult = executeGetRecordSchema(fn.args.record_type);
-                        conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
+                        conversationHistory += "\n\nTool 'get_record_fields' executed. Data:\n" + toolResult;
                     } 
                     else if (fn.name === 'fetch_online_schema') {
                         toolResult = executeFetchOnlineSchema(fn.args.record_type);
-                        conversationHistory += "\n\nTool 'fetch_online_schema' executed. Online Browser Data:\n" + toolResult;
+                        conversationHistory += "\n\nTool 'fetch_online_schema' executed. Data:\n" + toolResult;
                     }
                     else if (fn.name === 'get_netsuite_search_reference') {
                         toolResult = executeGetSearchReference();
-                        conversationHistory += "\n\nTool 'get_netsuite_search_reference' executed. Reference Guide:\n" + toolResult;
+                        conversationHistory += "\n\nTool 'get_netsuite_search_reference' executed. Guide:\n" + toolResult;
+                    }
+                    else if (fn.name === 'search_web_examples') {
+                        toolResult = executeSearchWebExamples(fn.args.search_query);
+                        conversationHistory += "\n\nTool 'search_web_examples' executed. Examples:\n" + toolResult;
+                        log.debug('Agent 2 Loop', 'Searched Web For: ' + fn.args.search_query);
                     }
                     else if (fn.name === 'create_saved_search') {
                         let jsonConfigStr = typeof fn.args.json_config === 'string' ? fn.args.json_config : JSON.stringify(fn.args.json_config);
@@ -242,7 +257,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
             } else {
                 let outputText = decision.text || "";
                 if (i < maxSteps - 1) {
-                    conversationHistory += "\n\nAI Output: " + outputText + "\nSystem Instruction: You did not call a tool. You MUST invoke the 'create_saved_search' tool to complete the task. Do not just return text.";
+                    conversationHistory += "\n\nAI Output: " + outputText + "\nSystem Instruction: You did not call a tool. You MUST invoke the 'create_saved_search' tool to complete the task.";
                     continue;
                 } else {
                     return outputText || "Agent 2 failed to execute a tool.";
@@ -256,8 +271,8 @@ function(query, https, serverWidget, runtime, log, record, search) {
     function runAgent3_Audit(originalPrompt, resultData, key) {
         const systemPrompt = "You are Agent 3 (Auditor). Compare the User Request with the Execution Result. \n" +
                              "1. If the Execution Result does NOT contain 'status: Success' or an internal ID, return satisfied: false.\n" +
-                             "2. If the Execution Result contains 'invalid column' or 'not in proper syntax', return satisfied: false and output: 'NetSuite rejected a column/filter. Search IDs often differ from Record IDs (e.g., datecreated vs createddate). Try an alternative field ID.'\n" +
-                             "3. If the Execution Result contains 'invalid search criteria', 'invalid date', or 'status', return satisfied: false and explicitly instruct: 'NetSuite rejected your date range or status format. You MUST call get_netsuite_search_reference to look up the exactly supported strings.'\n" +
+                             "2. If the Execution Result contains 'invalid column' or 'not in proper syntax', return satisfied: false.\n" +
+                             "3. If the Execution Result contains 'invalid search criteria', 'invalid date', or 'status', return satisfied: false and instruct: 'NetSuite rejected your date range. You MUST calculate an exact MM/DD/YYYY array using the within operator.'\n" +
                              "Return ONLY raw JSON: { \"satisfied\": boolean, \"reason\": string }.";
         
         const content = "User Request: " + originalPrompt + "\nExecution Result: " + resultData;
@@ -275,7 +290,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
         const systemPrompt = "You are Agent 4 (Designer). Convert this raw execution text into HTML. \n" +
                              "ALWAYS wrap your entire response in a <div> tag. \n" +
                              "If the raw data contains a success message and a relative link, create an active HTML <a> tag for it. \n" +
-                             "If it is an error message, format it clearly so the user understands the pipeline failed after 3 attempts.\n" +
+                             "If it is an error message, format it clearly so the user understands the pipeline failed.\n" +
                              "CRITICAL: Output ONLY valid HTML code. Do NOT include markdown blocks like ```html.";
         
         let rawHtml = callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
@@ -359,22 +374,44 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // 5. NATIVE NETSUITE EXECUTION (The Hands)
     // ========================================================================
 
-    // NEW KNOWLEDGE BASE TOOL: Hardcoded NetSuite Search Documentation
+    // NEW TOOL: Searches StackOverflow API for Examples (To be replaced by static repo later)
+    function executeSearchWebExamples(query) {
+        try {
+            const url = 'https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=' + encodeURIComponent('netsuite saved search ' + query) + '&site=stackoverflow&filter=!nNPvSNdWme';
+            const response = https.get({ url: url });
+            
+            if (response.code === 200) {
+                let data = JSON.parse(response.body);
+                if (data.items && data.items.length > 0) {
+                    let results = data.items.slice(0, 2).map(item => {
+                        // Strip HTML from body to save context window tokens
+                        let cleanBody = (item.body || "").replace(/<[^>]+>/g, ' ').substring(0, 1500);
+                        return "Title: " + item.title + "\nSnippet: " + cleanBody;
+                    }).join("\n\n---\n\n");
+                    return "Found Web Examples:\n" + results;
+                }
+                return "No examples found on the web for: " + query;
+            }
+            return "Web search API failed with status: " + response.code;
+        } catch(e) {
+            return "Error searching the web: " + e.message;
+        }
+    }
+
     function executeGetSearchReference() {
         return `
         NETSUITE SEARCH CRITERIA REFERENCE GUIDE:
         
         1. QUICK FILTERS (RELATIVE DATES): 
-           Allowed relative date strings for date fields (like 'trandate', 'datecreated'):
-           'today', 'yesterday', 'tomorrow', 'thisWeek', 'lastWeek', 'nextWeek', 'thisMonth', 'lastMonth', 'nextMonth', 'thisQuarter', 'lastQuarter', 'thisYear', 'lastYear'.
-           -> CRITICAL WARNING: Custom strings like 'lastTwoWeeks', 'last3Days', or 'last6Months' DO NOT EXIST and will crash the script. If a user asks for 'last two weeks', you must either calculate an exact date array ["MM/DD/YYYY", "MM/DD/YYYY"] or approximate using 'lastWeek' or 'thisMonth'.
+           Allowed exact strings: 'today', 'yesterday', 'tomorrow', 'thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'thisQuarter', 'lastQuarter', 'thisYear', 'lastYear'.
+           
+           -> STRICT RULE FOR UNSUPPORTED DATES: Custom strings like 'lastTwoWeeks' or 'last3Days' DO NOT EXIST. 
+           -> DO NOT COMPROMISE. If the user asks for a timeframe not in the allowed list, you MUST calculate the exact start and end dates based on Today's Date. Use the 'within' operator and provide an array of two exact date strings format MM/DD/YYYY. Example: "values": ["02/18/2026", "03/04/2026"].
         
         2. TRANSACTION STATUS IDs:
-           Transaction statuses must use strict internal IDs, formatted as RecordType:Status.
-           - Open Invoices: 'CustInvc:Open' (DO NOT use 'Invoice:Open')
+           - Open Invoices: 'CustInvc:Open'
            - Paid Invoices: 'CustInvc:PaidInFull'
-           - Pending Sales Orders: 'SalesOrd:A' (Pending Approval), 'SalesOrd:B' (Pending Fulfillment)
-           - Bills: 'VendBill:Open', 'VendBill:PaidInFull'
+           - Pending Sales Orders: 'SalesOrd:A', 'SalesOrd:B'
            
         3. VALID OPERATORS:
            'is', 'isnot', 'anyof', 'noneof', 'within', 'haskeywords', 'startswith', 'contains', 'between', 'empty', 'notempty'.
@@ -455,11 +492,9 @@ function(query, https, serverWidget, runtime, log, record, search) {
             searchConfig.title = (searchConfig.title || "AI Generated") + " (" + timestamp + ")";
             searchConfig.id = 'customsearch_ai_' + timestamp;
 
-            // --- DEBUG LOGS FOR VISIBILITY ---
-            log.debug('MAS Search Creation', 'Attempting to create search for type: ' + searchConfig.type);
-            log.debug('MAS Search Creation', 'Filters applied: ' + JSON.stringify(searchConfig.filters));
-            log.debug('MAS Search Creation', 'Columns requested: ' + JSON.stringify(searchConfig.columns));
-            // ---------------------------------
+            log.debug('MAS Search Creation', 'Record Type: ' + searchConfig.type);
+            log.debug('MAS Search Creation', 'Filters: ' + JSON.stringify(searchConfig.filters));
+            log.debug('MAS Search Creation', 'Columns: ' + JSON.stringify(searchConfig.columns));
 
             const newSearch = search.create(searchConfig);
             const searchId = newSearch.save();
