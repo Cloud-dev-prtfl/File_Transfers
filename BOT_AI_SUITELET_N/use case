@@ -20,3 +20,42 @@ Create a PDF with a title 'Testing Tags'. I want you to insert a horizontal rule
 
 
 Create a simple PDF document titled 'Welcome to NetSuite MAS'. Include a brief welcome paragraph, and below that, create a bulleted list of 3 benefits of using AI for NetSuite development.
+
+
+
+
+
+1. The "Master-Detail" Challenge (Complex SuiteQL + Table Grouping)
+The Prompt:
+
+"Run a SuiteQL query to get the details of the most recently created Sales Order. You need to fetch the Order Number, the Customer Name, and the items on that order (Item Name, Quantity, and Rate) by joining the Transaction and TransactionLine tables. Generate a professional 'Order Confirmation' PDF. Put the Order Number and Customer at the top, followed by a properly formatted HTML table displaying the items."
+
+Why it tests the system: This forces Agent 2 to write a complex SQL join. NetSuite's database schema for transactions is notoriously tricky (transaction joined to transactionline). It then has to parse that JSON array and dynamically map it to BFO XML table rows (<tr><td>).
+
+2. The Pagination & Macro Test (Advanced BFO XML)
+The Prompt:
+
+"Generate a multi-page 'Company Policies' PDF. I need you to use BFO XML <macrolist> to create a repeating header that says 'CONFIDENTIAL - INTERNAL USE ONLY' on every single page, and a footer that displays the current page number using the <pagenumber/> tag. Below that, generate 5 very long paragraphs of placeholder text so the document is forced to spill over onto a second page."
+
+Why it tests the system: NetSuite BFO relies on <macrolist>, <macro id="header">, and <body header="header"> to do pagination. HTML/CSS page breaks do not work. This tests if Agent 1 and Agent 2 truly understand the BFO reference guide and can build a natively paginated document.
+
+3. The Special Character Trap (Testing the Auditor's Auto-Fix)
+The Prompt:
+
+"Create a PDF directory for the following departments: 'Sales & Marketing', 'R&D', 'M&A', and 'IT <Hardware>'. Put these in a bulleted list. Also, insert a horizontal line using an <hr> tag and a line break using <br> between the title and the list."
+
+Why it tests the system: This is a deliberate sabotage attempt. XML strictly forbids unescaped ampersands (&), less-than signs (<), and unclosed tags (<br>, <hr>). Agent 2 will likely fail on the first attempt and trigger a NetSuite SAX Parsing Error. This tests whether Agent 3 (The Auditor) successfully catches the crash, reads the error, and forces Agent 2 to retry by escaping the characters (&amp;, &lt;) and closing the tags (<br/>, <hr/>).
+
+4. Aggregation & Conditional Styling (SuiteQL Math + CSS)
+The Prompt:
+
+"Run a SuiteQL query to find the Top 5 Customers by total transaction amount. You will need to use GROUP BY and SUM in your SQL. Once you have the data, generate a 'Top Client Leaderboard' PDF. The table header row should have a dark blue background with white text. Make the row for the #1 top customer have a light gold background color."
+
+Why it tests the system: This requires the AI to perform data aggregation on the database side rather than the JavaScript side. It also tests the AI's ability to inject inline CSS into specific XML elements dynamically based on the data it receives (checking if index == 0 to apply the gold background).
+
+5. The "Empty Dataset" Graceful Fallback
+The Prompt:
+
+"Run a SuiteQL query to find all Employees whose first name is 'Zyxwvutsrqponmlkjihgfedcba'. When the query inevitably returns no results or an empty array, generate a PDF that says 'Error: No matching employees found for this report' in large, bold, red text centered on the page, instead of printing an empty table."
+
+Why it tests the system: AI agents are notorious for hallucinating data when a database returns nothing, or simply crashing because they try to map over an undefined array. This tests Agent 2's ability to logically evaluate the run_suiteql output and use an if/else branching logic to generate a completely different PDF layout based on a null result.
