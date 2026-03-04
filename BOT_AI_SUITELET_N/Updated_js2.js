@@ -257,8 +257,23 @@ function(query, https, serverWidget, runtime, log, render, file, search) {
         }
 
         let resBody = JSON.parse(response.body);
-        let parts = resBody.candidates[0].content.parts;
-        
+
+        // --- NEW SAFETY CHECK ADDED HERE ---
+        if (!resBody.candidates || !resBody.candidates[0]) {
+            throw new Error("Invalid API Response: Missing candidates block. Full response: " + response.body);
+        }
+
+        let candidate = resBody.candidates[0];
+
+        // Sometimes the Gemini API trips a safety filter (especially with emails/names from SuiteQL)
+        // When this happens, it omits the "content" entirely and just sends a finishReason.
+        if (!candidate.content || !candidate.content.parts) {
+            throw new Error("Gemini API omitted content parts. Finish Reason: " + (candidate.finishReason || 'Unknown'));
+        }
+
+        let parts = candidate.content.parts;
+        // ------------------------------------
+
         let funcCall = null;
         let textResult = "";
         
