@@ -16,12 +16,23 @@ function(query, https, serverWidget, runtime, log, record, search) {
     // Tools exclusively for Agent 1 (Discovery & Planning)
     const ANALYST_TOOLS_SCHEMA = [
         {
-            name: "fetch_online_schema",
-            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'. MUST use this to validate fields and record types BEFORE creating your technical plan.",
+            name: "get_record_fields",
+            description: "Fetches valid NetSuite internal body field IDs for a given record type. Use this to understand standard fields.",
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up (e.g., 'account', 'customer')." }
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record (e.g., 'customer', 'invoice')." }
+                },
+                required: ["record_type"]
+            }
+        },
+        {
+            name: "fetch_online_schema",
+            description: "Scrapes the official NetSuite Schema/Records Browser to get valid 'Search Columns' and 'Search Filters'. MUST use this to discover available criteria logic BEFORE creating your technical plan.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record to look up (e.g., 'invoice', 'customer')." }
                 },
                 required: ["record_type"]
             }
@@ -36,7 +47,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
             parameters: {
                 type: "OBJECT",
                 properties: {
-                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record (e.g., 'customer', 'transaction')." }
+                    record_type: { type: "STRING", description: "The internal ID of the NetSuite record." }
                 },
                 required: ["record_type"]
             }
@@ -107,7 +118,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
                 if (!audit.satisfied) {
                     log.audit('Pipeline Retry', 'Agent 3 failed content. Reason: ' + audit.reason);
-                    let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis + "\nIMPORTANT: If the error was 'invalid column', you MUST call 'fetch_online_schema' to find the exact Search Column IDs.";
+                    let retryPrompt = "Previous attempt failed. Auditor Reason: " + audit.reason + ". \nOriginal Request: " + analysis + "\nIMPORTANT: If the error was 'invalid column' or 'invalid search criteria', you MUST call 'fetch_online_schema' to find the exact Search Column or Filter IDs.";
                     executionResult = runAgent2_Execution(retryPrompt, apiKey); 
                 }
 
@@ -135,12 +146,13 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent1_Analysis(prompt, key) {
         let conversationHistory = "User Request:\n" + prompt;
-        const maxSteps = 3; 
+        const maxSteps = 4; // Increased to 4 to allow multiple schema checks
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 1 (Analyst). Analyze the user request. \n" +
-                                 "Identify the user's core intent. If they want a saved search or require querying a specific record, you MUST use 'fetch_online_schema' to check the official NetSuite documentation for the correct record internal ID, search filters, and search columns FIRST. \n" +
-                                 "Do NOT guess field names. Once you have the exact schema, write a strict execution plan for Agent 2 detailing exactly what record type, filters, and columns to use.\n" +
+                                 "Identify the user's core intent. If they want a saved search, you MUST use the tools ('fetch_online_schema' and 'get_record_fields') to look up the available Search Filters (criteria) and Search Columns for the target record type FIRST. \n" +
+                                 "Do NOT guess field names or filter logic. Construct your logical criteria based ONLY on the available filters discovered from the tools. \n" +
+                                 "Once you have the exact schema, write a strict execution plan for Agent 2 detailing exactly what record type, filters (with valid NetSuite operators and values), and columns to use.\n" +
                                  "Current Context:\n" + conversationHistory;
             
             const decision = callGemini(systemPrompt, key, ANALYST_TOOLS_SCHEMA);
@@ -152,6 +164,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
                         let toolResult = executeFetchOnlineSchema(fn.args.record_type);
                         conversationHistory += "\n\nTool 'fetch_online_schema' executed. Online Browser Data:\n" + toolResult;
                         log.debug('Agent 1 Loop', 'Fetched online schema for ' + fn.args.record_type);
+                    } else if (fn.name === 'get_record_fields') {
+                        let toolResult = executeGetRecordSchema(fn.args.record_type);
+                        conversationHistory += "\n\nTool 'get_record_fields' executed. Schema Result:\n" + toolResult;
+                        log.debug('Agent 1 Loop', 'Fetched body fields for ' + fn.args.record_type);
                     } else {
                         conversationHistory += "\n\nError: Unknown Tool " + fn.name;
                     }
@@ -171,7 +187,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
         
         for (let i = 0; i < maxSteps; i++) {
             const systemPrompt = "You are Agent 2 (Executor). Use the provided tools to fulfill the plan provided by Agent 1. \n" +
-                                 "CRITICAL RULE 1: Agent 1 has likely provided the exact Search Columns and Filters. Follow them. If something fails, use 'fetch_online_schema' to double-check.\n" +
+                                 "CRITICAL RULE 1: Agent 1 has provided the exact Search Columns and Filters. Follow them. If something fails, use 'fetch_online_schema' to double-check.\n" +
                                  "CRITICAL RULE 2: When calling 'create_saved_search', ensure the 'filters' array contains objects strictly with 'name', 'operator', and 'values' properties. Never use 'field' or 'value' as keys.\n" +
                                  "Current Context:\n" + conversationHistory;
             
@@ -231,9 +247,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent4_Format(rawData, key) {
         const systemPrompt = "You are Agent 4 (Designer). Convert this raw execution text into professional HTML. \n" +
-                             "If the raw data contains a success message and a NetSuite relative link, YOU MUST create an active HTML <a> tag for it. \n" +
-                             "Use <b> for key data. Do not alter core values.\n" +
-                             "CRITICAL: Output ONLY the raw HTML code. Do NOT include markdown blocks like ```html. Do NOT include any conversational text explaining the HTML.";
+                             "ALWAYS wrap your entire response in a <div> tag. \n" +
+                             "If the raw data contains a success message and a NetSuite relative link, create an active HTML <a> tag for it. \n" +
+                             "If the raw data is an error message, wrap it in a <div> with a bold title. \n" +
+                             "CRITICAL: Output ONLY valid HTML code. Do NOT include markdown blocks like ```html. Do NOT add conversational text.";
         
         let rawHtml = callGemini(systemPrompt + "\n\nRaw Data: " + rawData, key);
         return cleanMarkdown(rawHtml);
@@ -241,9 +258,10 @@ function(query, https, serverWidget, runtime, log, record, search) {
 
     function runAgent5_Review(originalPrompt, htmlContent, key) {
         const systemPrompt = "You are Agent 5 (Reviewer). Review this HTML response. \n" +
-                             "If it correctly addresses the prompt and contains valid HTML, return the HTML exactly as is. \n" +
-                             "If it is broken or harmful, return a simple polite error message.\n" +
-                             "CRITICAL: Output ONLY the final HTML or error message. Do NOT add conversational text like 'The proposed HTML is valid'. Do NOT use markdown blocks like ```html.";
+                             "Your ONLY job is to ensure the output is safe HTML. \n" +
+                             "If the text is plain and lacks HTML tags, wrap it in <p> tags and return it. \n" +
+                             "DO NOT refuse to return HTML. DO NOT output error messages like 'I cannot return valid HTML'. \n" +
+                             "CRITICAL: Output ONLY the final HTML. Do NOT use markdown blocks like ```html.";
         
         let reviewedHtml = callGemini(systemPrompt + "\n\nProposed HTML:\n" + htmlContent, key);
         return cleanMarkdown(reviewedHtml);
@@ -328,7 +346,6 @@ function(query, https, serverWidget, runtime, log, record, search) {
     function executeFetchOnlineSchema(recordType) {
         try {
             const safeType = recordType.toLowerCase().trim();
-            // Pointing to the SuiteScript browser equivalent of the schema browser for accurate search.create() columns
             const url = 'https://www.netsuite.com/help/helpcenter/en_US/srbrowser/Browser2020_1/script/record/' + safeType + '.html';
             
             const response = https.get({ url: url });
@@ -342,7 +359,7 @@ function(query, https, serverWidget, runtime, log, record, search) {
                 
                 cleanText = cleanText.substring(0, 15000); 
                 
-                return "Successfully scraped NetSuite Records Browser for: " + safeType + ". Look for the 'Search Columns' and 'Search Filters' sections in this data to validate your IDs: " + cleanText;
+                return "Successfully scraped NetSuite Records Browser for: " + safeType + ". Look for the 'Search Columns' and 'Search Filters' sections in this data to validate your criteria IDs: " + cleanText;
             } else {
                 return "Failed to fetch online schema browser. HTTP Code: " + response.code;
             }
