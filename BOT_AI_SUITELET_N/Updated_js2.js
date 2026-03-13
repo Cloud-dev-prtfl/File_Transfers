@@ -5,6 +5,7 @@
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG) architecture, 
  * and programmatic search validation via N/search.
+ * UI has been updated to support conversational history.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -91,42 +92,92 @@ function (serverWidget, llm, search, query) {
     };
 
     /**
-     * Primary Suitelet Request Handler executing the architectural flow.
+     * Primary Suitelet Request Handler executing the architectural flow with Chatbot UI.
      */
     const onRequest = (context) => {
-        if (context.request.method === 'GET') {
-            // Render the initial Chatbot UI
-            const form = serverWidget.createForm({ title: 'NetSuite AI Formula Assistant' });
+        const form = serverWidget.createForm({ title: 'NetSuite Saved Search AI Generator' });
+        
+        // Create a field group for the chat interface
+        const fieldgroup = form.addFieldGroup({ id: 'fieldgroupid', label: 'Conversation' });
+        fieldgroup.isSingleColumn = true;
+
+        // Hidden field to track history size
+        const historySize = parseInt(context.request.parameters.custpage_num_chats || '0');
+        const numChats = form.addField({
+            id: 'custpage_num_chats',
+            type: serverWidget.FieldType.INTEGER,
+            container: 'fieldgroupid',
+            label: 'History Size'
+        });
+        numChats.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+
+        if (context.request.method === 'POST') {
+            const userQuery = context.request.parameters.custpage_text;
             
-            const chatWindow = form.addField({
-                id: 'custpage_chat_window',
-                type: serverWidget.FieldType.INLINEHTML,
-                label: 'Chat Interface'
+            // 1. Rebuild History Safely
+            if (historySize > 0) {
+                for (let i = 0; i < historySize; i++) {
+                    const histValue = context.request.parameters['custpage_hist' + i];
+                    if (histValue) {
+                        const histField = form.addField({
+                            id: 'custpage_hist_display' + i,
+                            type: serverWidget.FieldType.TEXTAREA,
+                            label: (i % 2 === 0) ? 'You' : 'Search Bot',
+                            container: 'fieldgroupid'
+                        });
+                        histField.defaultValue = histValue;
+                        histField.updateDisplayType({ displayType: serverWidget.FieldDisplayType.INLINE });
+
+                        // Preserve for next POST
+                        const hiddenHist = form.addField({
+                            id: 'custpage_hist' + i,
+                            type: serverWidget.FieldType.TEXTAREA,
+                            label: 'Hidden Hist',
+                            container: 'fieldgroupid'
+                        });
+                        hiddenHist.defaultValue = histValue;
+                        hiddenHist.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+                    }
+                }
+            }
+
+            // 2. Display Current Prompt
+            const currentPromptIndex = historySize;
+            const currentRespIndex = historySize + 1;
+
+            const promptDisplay = form.addField({
+                id: 'custpage_hist_display' + currentPromptIndex,
+                type: serverWidget.FieldType.TEXTAREA,
+                label: 'You',
+                container: 'fieldgroupid'
+            });
+            promptDisplay.defaultValue = userQuery;
+            promptDisplay.updateDisplayType({ displayType: serverWidget.FieldDisplayType.INLINE });
+
+            // Hidden field to carry prompt to next turn
+            const promptHidden = form.addField({
+                id: 'custpage_hist' + currentPromptIndex,
+                type: serverWidget.FieldType.TEXTAREA,
+                label: 'Hidden Prompt',
+                container: 'fieldgroupid'
+            });
+            promptHidden.defaultValue = userQuery;
+            promptHidden.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+
+            // 3. Generate and Display AI Response using syncJS Core RAG Logic
+            const resultField = form.addField({
+                id: 'custpage_hist_display' + currentRespIndex,
+                type: serverWidget.FieldType.TEXTAREA,
+                label: 'Search Bot',
+                container: 'fieldgroupid'
             });
 
-            // Initial greeting bubble
-            chatWindow.defaultValue = `
-                <div style="border: 1px solid #ccc; border-radius: 8px; padding: 15px; height: 400px; overflow-y: auto; background-color: #f4f6f9; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px;">
-                    <div style="align-self: flex-start; max-width: 70%; background-color: #ffffff; padding: 10px 15px; border-radius: 15px 15px 15px 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                        <strong>AI Assistant:</strong><br/>Hello! I'm your NetSuite Formula Bot. Describe the complex logic you need, and I'll generate a syntax-validated formula for you.
-                    </div>
-                </div>
-            `;
-            
-            form.addField({
-                id: 'custpage_user_query',
+            const resultHidden = form.addField({
+                id: 'custpage_hist' + currentRespIndex,
                 type: serverWidget.FieldType.TEXTAREA,
-                label: 'Your Message'
+                label: 'Hidden Resp',
+                container: 'fieldgroupid'
             });
-            
-            form.addSubmitButton({ label: 'Send to Assistant' });
-            context.response.writePage(form);
-            
-        } else if (context.request.method === 'POST') {
-            const userQuery = context.request.parameters.custpage_user_query;
-            let finalFormula = '';
-            let validationAttempts = 0;
-            const maxAttempts = 3;
 
             try {
                 // Architectural Step 1: Vectorize the user's natural language query
@@ -134,7 +185,7 @@ function (serverWidget, llm, search, query) {
                     inputs: [userQuery],
                     embedModelFamily: llm.EmbedModelFamily.COHERE_EMBED
                 });
-                const userQueryVector = queryEmbeddingResponse.embeddings[0]; // Targeted first index
+                const userQueryVector = queryEmbeddingResponse.embeddings[0]; 
 
                 // Architectural Step 2: RAG Retrieval - Find relevant truth data
                 const contextRecords = retrieveRelevantFormulas(userQueryVector);
@@ -148,6 +199,9 @@ function (serverWidget, llm, search, query) {
                 });
 
                 // Architectural Step 3: Generation and Strict Validation Loop
+                let finalFormula = '';
+                let validationAttempts = 0;
+                const maxAttempts = 3;
                 let currentPrompt = `You are a NetSuite PL/SQL expert. Write a NetSuite saved search formula for the following request: ${userQuery}. Return ONLY the raw formula text without markdown formatting or conversational filler.`;
 
                 while (validationAttempts < maxAttempts) {
@@ -177,70 +231,47 @@ function (serverWidget, llm, search, query) {
                     }
                 }
 
-                // Render Chat UI with Results
-                const resultForm = serverWidget.createForm({ title: 'NetSuite AI Formula Assistant' });
+                // Render Final Validated Results to the Chat UI
+                let responseText = finalFormula 
+                    ? finalFormula 
+                    : "Error: Unable to generate a syntactically valid formula after 3 iterative attempts. Please refine the input prompt or update the knowledge repository.";
                 
-                const chatWindow = resultForm.addField({
-                    id: 'custpage_chat_window',
-                    type: serverWidget.FieldType.INLINEHTML,
-                    label: 'Chat Interface'
-                });
-
-                let botResponseContent = finalFormula 
-                    ? `<pre style="white-space: pre-wrap; margin: 0; background: #eee; padding: 8px; border-radius: 5px;"><code>${finalFormula}</code></pre>` 
-                    : "<em>Error: Unable to generate a syntactically valid formula after 3 iterative attempts. Please refine the input prompt or update the knowledge repository.</em>";
-
-                chatWindow.defaultValue = `
-                    <div style="border: 1px solid #ccc; border-radius: 8px; padding: 15px; height: 400px; overflow-y: auto; background-color: #f4f6f9; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px;">
-                        <div style="align-self: flex-end; max-width: 70%; background-color: #0078d4; color: white; padding: 10px 15px; border-radius: 15px 15px 0px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                            <strong>You:</strong><br/>${userQuery}
-                        </div>
-                        <div style="align-self: flex-start; max-width: 70%; background-color: #ffffff; padding: 10px 15px; border-radius: 15px 15px 15px 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                            <strong>AI Assistant:</strong><br/>${botResponseContent}
-                        </div>
-                    </div>
-                `;
-
-                resultForm.addField({
-                    id: 'custpage_user_query',
-                    type: serverWidget.FieldType.TEXTAREA,
-                    label: 'Follow-up Message'
-                });
-                
-                resultForm.addSubmitButton({ label: 'Send to Assistant' });
-                context.response.writePage(resultForm);
+                resultField.defaultValue = responseText;
+                resultHidden.defaultValue = responseText;
+                numChats.defaultValue = historySize + 2;
 
             } catch (err) {
-                // Render System Error in Chat UI
-                const errorForm = serverWidget.createForm({ title: 'NetSuite AI Formula Assistant - Error' });
-                
-                const errorChatWindow = errorForm.addField({
-                    id: 'custpage_chat_window',
-                    type: serverWidget.FieldType.INLINEHTML,
-                    label: 'Chat Interface'
-                });
-
-                errorChatWindow.defaultValue = `
-                    <div style="border: 1px solid #ccc; border-radius: 8px; padding: 15px; height: 400px; overflow-y: auto; background-color: #f4f6f9; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px;">
-                         <div style="align-self: flex-end; max-width: 70%; background-color: #0078d4; color: white; padding: 10px 15px; border-radius: 15px 15px 0px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                            <strong>You:</strong><br/>${userQuery}
-                        </div>
-                        <div style="align-self: flex-start; max-width: 70%; background-color: #ffe6e6; border: 1px solid #ffcccc; padding: 10px 15px; border-radius: 15px 15px 15px 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); color: #b30000;">
-                            <strong>System Error:</strong><br/>${err.message}
-                        </div>
-                    </div>
-                `;
-
-                errorForm.addField({
-                    id: 'custpage_user_query',
-                    type: serverWidget.FieldType.TEXTAREA,
-                    label: 'Try Again'
-                });
-                
-                errorForm.addSubmitButton({ label: 'Send to Assistant' });
-                context.response.writePage(errorForm);
+                // Catch systemic execution errors
+                resultField.defaultValue = "System Error Details: " + err.message;
+                resultHidden.defaultValue = "System Error Details: " + err.message;
+                numChats.defaultValue = historySize; // Don't increment on system failure
             }
+
+            resultField.updateDisplayType({ displayType: serverWidget.FieldDisplayType.INLINE });
+            resultHidden.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+
+        } else {
+            // Initial Load (GET)
+            numChats.defaultValue = 0;
+            const introField = form.addField({
+                id: 'custpage_intro',
+                type: serverWidget.FieldType.HELP,
+                label: 'Welcome',
+                container: 'fieldgroupid'
+            });
+            // Fixed the .label assignment from bot2 to correctly assign help text
+            introField.defaultValue = "Describe the complex formula logic required..."; 
         }
+
+        form.addField({
+            id: 'custpage_text',
+            type: serverWidget.FieldType.TEXTAREA,
+            label: 'New Message',
+            container: 'fieldgroupid'
+        });
+
+        form.addSubmitButton({ label: 'Generate Validated Formula' });
+        context.response.writePage(form);
     };
 
     return { onRequest };
