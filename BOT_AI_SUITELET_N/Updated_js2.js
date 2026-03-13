@@ -25,7 +25,7 @@ function (serverWidget, llm, search, query) {
             normA += Math.pow(vecA[i], 2);
             normB += Math.pow(vecB[i], 2);
         }
-        if (normA === 0 || normB === 0) return 0; // Fixed broken || operator
+        if (normA === 0 || normB === 0) return 0;
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     };
 
@@ -34,7 +34,7 @@ function (serverWidget, llm, search, query) {
      * Extracts the stored JSON embeddings and performs real-time similarity sorting.
      */
     const retrieveRelevantFormulas = (userQueryVector) => {
-        const formulaLibrary = []; // Fixed missing array initialization
+        const formulaLibrary = [];
         
         // Execute a targeted search against the Source of Truth repository
         const formulaSearch = search.create({
@@ -81,7 +81,7 @@ function (serverWidget, llm, search, query) {
                         name: 'formulatext',
                         formula: formulaString
                     })
-                ] // Fixed missing search column logic
+                ]
             });
             // If the object creation succeeds without throwing an exception, syntax is valid
             return { isValid: true, error: null };
@@ -253,14 +253,16 @@ function (serverWidget, llm, search, query) {
         } else {
             // Initial Load (GET)
             numChats.defaultValue = 0;
+            
+            // FIX: Changed from HELP type to INLINEHTML to bypass NetSuite's 15-character limit
             const introField = form.addField({
                 id: 'custpage_intro',
-                type: serverWidget.FieldType.HELP,
+                type: serverWidget.FieldType.INLINEHTML,
                 label: 'Welcome',
                 container: 'fieldgroupid'
             });
-            // Fixed the .label assignment from bot2 to correctly assign help text
-            introField.defaultValue = "Describe the complex formula logic required..."; 
+            
+            introField.defaultValue = "<br/><p style='font-size: 14px; color: #333333;'><b>Welcome:</b> Describe the complex formula logic required...</p><br/>"; 
         }
 
         form.addField({
