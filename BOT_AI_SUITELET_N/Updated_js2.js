@@ -5,8 +5,8 @@
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot
  */
 
-define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
-function (serverWidget, llm, search, query) {
+define(['N/ui/serverWidget', 'N/llm', 'N/search'], 
+function (serverWidget, llm, search) {
 
     const calculateCosineSimilarity = (vecA, vecB) => {
         let dotProduct = 0, normA = 0, normB = 0;
@@ -27,7 +27,11 @@ function (serverWidget, llm, search, query) {
                 columns: ['custrecord_formula_description', 'custrecord_formula_syntax', 'custrecord_formula_embedding']
             });
 
-            formulaSearch.run().each(result => {
+            // Added getRange to prevent infinite loops / governance limit breaches
+            // if the custom record library grows too large.
+            const results = formulaSearch.run().getRange({ start: 0, end: 1000 });
+            
+            results.forEach(result => {
                 const embeddingString = result.getValue('custrecord_formula_embedding');
                 if (embeddingString) {
                     const recordVector = JSON.parse(embeddingString);
@@ -39,7 +43,6 @@ function (serverWidget, llm, search, query) {
                         score: similarity
                     });
                 }
-                return true;
             });
         } catch (e) {
             // Fails gracefully if the custom record doesn't exist yet
@@ -65,7 +68,7 @@ function (serverWidget, llm, search, query) {
 
     const onRequest = (context) => {
         if (context.request.method === 'GET') {
-            const form = serverWidget.createForm({ title: 'AI formula Assistance', hideNavBar: false });
+            const form = serverWidget.createForm({ title: 'AI Formula Assistance', hideNavBar: false });
             const htmlField = form.addField({ id: 'custpage_chat_ui', type: serverWidget.FieldType.INLINEHTML, label: 'Chat Interface' });
 
             htmlField.defaultValue = `
@@ -83,7 +86,7 @@ function (serverWidget, llm, search, query) {
                     @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 80%, 100% { content: ''; } }
                 </style>
                 <div id="custom-chat-app">
-                    <div class="chat-header">AI formula Assistance</div>
+                    <div class="chat-header">AI Formula Assistance</div>
                     <div class="chat-window" id="chat-history">
                         <div class="message bot">I am Jules. My multi-agent pipeline is active. How can I help you today?</div>
                     </div>
@@ -149,11 +152,11 @@ function (serverWidget, llm, search, query) {
             let userQuery = '';
             try {
                 if (context.request.body) {
-                    userQuery = JSON.parse(context.request.body).query || '';
+                    const parsedBody = JSON.parse(context.request.body);
+                    userQuery = parsedBody.query || '';
                 }
             } catch (e) {
-                // If it wasn't JSON, it's a critical breakdown
-                return context.response.write(JSON.stringify({ success: false, text: "Error: Received malformed data." }));
+                return context.response.write(JSON.stringify({ success: false, text: "Error: Received malformed JSON data." }));
             }
 
             if (!userQuery) {
@@ -180,17 +183,18 @@ function (serverWidget, llm, search, query) {
                 while (validationAttempts < 3) {
                     const generateParams = {
                         prompt: currentPrompt,
-                        modelFamily: llm.ModelFamily.COHERE_COMMAND, // Explicitly defined to prevent 'Unexpected Error'
+                        modelFamily: llm.ModelFamily.COHERE_COMMAND,
                         modelParameters: { temperature: 0.1, maxTokens: 1000 }
                     };
                     
-                    // Only pass documents array if it's not empty, otherwise N/llm crashes
                     if (ragDocuments.length > 0) {
                         generateParams.documents = ragDocuments;
                     }
 
                     const llmResponse = llm.generateText(generateParams);
                     let generatedText = llmResponse.text.trim();
+                    
+                    // Cleanup common LLM artifacts
                     generatedText = generatedText.replace(/^```sql\n?/i, '').replace(/^```\n?/i, '').replace(/```$/i, '').trim();
 
                     // Step 4: Validate
@@ -212,7 +216,6 @@ function (serverWidget, llm, search, query) {
                 }
 
             } catch (err) {
-                // Capture strict detailed error for debugging
                 context.response.write(JSON.stringify({ 
                     success: false, 
                     text: err.message || "Unknown NetSuite LLM Error Occurred." 
