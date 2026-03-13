@@ -97,8 +97,9 @@ function (serverWidget, llm, search, query) {
                     </div>
                 </div>
                 <div id="chat-input-area">
-                    <input type="text" id="chat-input" placeholder="e.g., Calculate days between date created and closed..." onkeypress="if(event.key === 'Enter') sendQuery()" />
-                    <button id="send-btn" onclick="sendQuery()">Generate</button>
+                    <input type="text" id="chat-input" placeholder="e.g., Calculate days between date created and closed..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); sendQuery(); }" />
+                    
+                    <button type="button" id="send-btn" onclick="sendQuery()">Generate</button>
                 </div>
             </div>
         </div>
@@ -135,10 +136,12 @@ function (serverWidget, llm, search, query) {
                     // 4. Render Bot Response
                     if (data.success) {
                         const formulaId = 'code-' + Date.now();
+                        
+                        // FIXED: Added type="button" to the generated copy button
                         const htmlResponse = \`
                             <strong>Validated Formula Generated:</strong>
                             <pre id="\${formulaId}">\${escapeHtml(data.formula)}</pre>
-                            <button class="copy-btn" onclick="copyToClipboard('\${formulaId}', this)">
+                            <button type="button" class="copy-btn" onclick="copyToClipboard('\${formulaId}', this)">
                                 📋 Copy Formula
                             </button>
                         \`;
@@ -147,7 +150,9 @@ function (serverWidget, llm, search, query) {
                         appendMessage('❌ Validation Failed: ' + data.error, 'bot-msg');
                     }
                 } catch (error) {
-                    document.getElementById(loadingId).remove();
+                    if (document.getElementById(loadingId)) {
+                        document.getElementById(loadingId).remove();
+                    }
                     appendMessage('⚠️ System Error: ' + error.message, 'bot-msg');
                 } finally {
                     inputField.disabled = false;
