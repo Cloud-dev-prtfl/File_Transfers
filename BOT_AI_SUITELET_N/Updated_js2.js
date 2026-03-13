@@ -95,16 +95,31 @@ function (serverWidget, llm, search, query) {
      */
     const onRequest = (context) => {
         if (context.request.method === 'GET') {
-            // Render the initial user interface
-            const form = serverWidget.createForm({ title: 'NetSuite Saved Search AI Bot' });
+            // Render the initial Chatbot UI
+            const form = serverWidget.createForm({ title: 'NetSuite AI Formula Assistant' });
+            
+            const chatWindow = form.addField({
+                id: 'custpage_chat_window',
+                type: serverWidget.FieldType.INLINEHTML,
+                label: 'Chat Interface'
+            });
+
+            // Initial greeting bubble
+            chatWindow.defaultValue = `
+                <div style="border: 1px solid #ccc; border-radius: 8px; padding: 15px; height: 400px; overflow-y: auto; background-color: #f4f6f9; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="align-self: flex-start; max-width: 70%; background-color: #ffffff; padding: 10px 15px; border-radius: 15px 15px 15px 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                        <strong>AI Assistant:</strong><br/>Hello! I'm your NetSuite Formula Bot. Describe the complex logic you need, and I'll generate a syntax-validated formula for you.
+                    </div>
+                </div>
+            `;
             
             form.addField({
                 id: 'custpage_user_query',
-                type: serverWidget.FieldType.LONGTEXT,
-                label: 'Describe the complex formula logic required...'
+                type: serverWidget.FieldType.TEXTAREA,
+                label: 'Your Message'
             });
             
-            form.addSubmitButton({ label: 'Generate Validated Formula' });
+            form.addSubmitButton({ label: 'Send to Assistant' });
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
@@ -162,30 +177,67 @@ function (serverWidget, llm, search, query) {
                     }
                 }
 
-                // Render Final Validated Results
-                const resultForm = serverWidget.createForm({ title: 'Formula Generation Result' });
-                const resultField = resultForm.addField({
-                    id: 'custpage_result',
-                    type: serverWidget.FieldType.LONGTEXT,
-                    label: 'Generated and Validated Formula'
+                // Render Chat UI with Results
+                const resultForm = serverWidget.createForm({ title: 'NetSuite AI Formula Assistant' });
+                
+                const chatWindow = resultForm.addField({
+                    id: 'custpage_chat_window',
+                    type: serverWidget.FieldType.INLINEHTML,
+                    label: 'Chat Interface'
+                });
+
+                let botResponseContent = finalFormula 
+                    ? `<pre style="white-space: pre-wrap; margin: 0; background: #eee; padding: 8px; border-radius: 5px;"><code>${finalFormula}</code></pre>` 
+                    : "<em>Error: Unable to generate a syntactically valid formula after 3 iterative attempts. Please refine the input prompt or update the knowledge repository.</em>";
+
+                chatWindow.defaultValue = `
+                    <div style="border: 1px solid #ccc; border-radius: 8px; padding: 15px; height: 400px; overflow-y: auto; background-color: #f4f6f9; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px;">
+                        <div style="align-self: flex-end; max-width: 70%; background-color: #0078d4; color: white; padding: 10px 15px; border-radius: 15px 15px 0px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                            <strong>You:</strong><br/>${userQuery}
+                        </div>
+                        <div style="align-self: flex-start; max-width: 70%; background-color: #ffffff; padding: 10px 15px; border-radius: 15px 15px 15px 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                            <strong>AI Assistant:</strong><br/>${botResponseContent}
+                        </div>
+                    </div>
+                `;
+
+                resultForm.addField({
+                    id: 'custpage_user_query',
+                    type: serverWidget.FieldType.TEXTAREA,
+                    label: 'Follow-up Message'
                 });
                 
-                if (finalFormula) {
-                    resultField.defaultValue = finalFormula;
-                } else {
-                    resultField.defaultValue = "Error: Unable to generate a syntactically valid formula after 3 iterative attempts. Please refine the input prompt or update the knowledge repository.";
-                }
-
+                resultForm.addSubmitButton({ label: 'Send to Assistant' });
                 context.response.writePage(resultForm);
 
             } catch (err) {
-                // Catch systemic execution errors, such as concurrency limits
-                const errorForm = serverWidget.createForm({ title: 'Execution Error' });
+                // Render System Error in Chat UI
+                const errorForm = serverWidget.createForm({ title: 'NetSuite AI Formula Assistant - Error' });
+                
+                const errorChatWindow = errorForm.addField({
+                    id: 'custpage_chat_window',
+                    type: serverWidget.FieldType.INLINEHTML,
+                    label: 'Chat Interface'
+                });
+
+                errorChatWindow.defaultValue = `
+                    <div style="border: 1px solid #ccc; border-radius: 8px; padding: 15px; height: 400px; overflow-y: auto; background-color: #f4f6f9; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px;">
+                         <div style="align-self: flex-end; max-width: 70%; background-color: #0078d4; color: white; padding: 10px 15px; border-radius: 15px 15px 0px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                            <strong>You:</strong><br/>${userQuery}
+                        </div>
+                        <div style="align-self: flex-start; max-width: 70%; background-color: #ffe6e6; border: 1px solid #ffcccc; padding: 10px 15px; border-radius: 15px 15px 15px 0px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); color: #b30000;">
+                            <strong>System Error:</strong><br/>${err.message}
+                        </div>
+                    </div>
+                `;
+
                 errorForm.addField({
-                    id: 'custpage_error',
-                    type: serverWidget.FieldType.LONGTEXT,
-                    label: 'System Error Details'
-                }).defaultValue = err.message;
+                    id: 'custpage_user_query',
+                    type: serverWidget.FieldType.TEXTAREA,
+                    label: 'Try Again'
+                });
+                
+                errorForm.addSubmitButton({ label: 'Send to Assistant' });
                 context.response.writePage(errorForm);
             }
         }
