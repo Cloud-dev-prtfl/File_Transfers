@@ -61,7 +61,7 @@ function (serverWidget, llm, search, query) {
     };
 
     /**
-     * Performs strict deterministic validation of generated formula syntax 
+     * Performs strict deterministic validation of generated formula syntax. 
      */
     const validateFormulaSyntax = (formulaString) => {
         try {
@@ -94,7 +94,8 @@ function (serverWidget, llm, search, query) {
                 label: 'Chat Interface'
             });
 
-            // Inject the CSS and HTML/JS mimicking the modern UI
+            // Inject the CSS and HTML/JS. 
+            // FIXED: Added type="button" and preventDefault() to prevent NS page reloads.
             htmlField.defaultValue = `
                 <style>
                     #custom-chat-app {
@@ -132,7 +133,7 @@ function (serverWidget, llm, search, query) {
                         font-size: 14px;
                         line-height: 1.5;
                         word-wrap: break-word;
-                        white-space: pre-wrap; /* Keeps code formatting */
+                        white-space: pre-wrap;
                     }
                     .message.bot {
                         background-color: #f8f9fa;
@@ -191,22 +192,25 @@ function (serverWidget, llm, search, query) {
                 <div id="custom-chat-app">
                     <div class="chat-header">AI formula Assistance</div>
                     <div class="chat-window" id="chat-history">
-                        <div class="message bot">I am your AI Formula Assistant. My multi-agent pipeline is active. How can I help you today?</div>
+                        <div class="message bot">I am Jules. My multi-agent pipeline is active. How can I help you today?</div>
                     </div>
                     <div class="input-container">
-                        <input type="text" id="user-input" class="chat-input" placeholder="Example: Create a saved search formula for customers in California..." autocomplete="off" />
-                        <button id="send-btn" class="send-btn">AI formula Assistance</button>
+                        <input type="text" id="user-input" class="chat-input" placeholder="Example: Create a saved search for customers in California..." autocomplete="off" />
+                        <button type="button" id="send-btn" class="send-btn">Send to MAS</button>
                     </div>
                 </div>
 
                 <script>
-                    document.getElementById('send-btn').addEventListener('click', async () => {
+                    document.getElementById('send-btn').addEventListener('click', async (e) => {
+                        e.preventDefault(); // Prevents standard NetSuite form submission
+                        
                         const inputEl = document.getElementById('user-input');
                         const text = inputEl.value.trim();
                         if (!text) return;
 
                         const history = document.getElementById('chat-history');
-                        history.innerHTML += '<div class="message user">' + text + '</div>';
+                        // Escape basic HTML from user input
+                        history.innerHTML += '<div class="message user">' + text.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</div>';
                         inputEl.value = '';
 
                         const loadingId = 'loading-' + Date.now();
@@ -216,28 +220,42 @@ function (serverWidget, llm, search, query) {
                         try {
                             const response = await fetch(window.location.href, {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: { 
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json'
+                                },
                                 body: JSON.stringify({ query: text })
                             });
                             
-                            const data = await response.json();
+                            const responseText = await response.text();
+                            let data;
+                            try {
+                                data = JSON.parse(responseText);
+                            } catch(err) {
+                                document.getElementById(loadingId).innerHTML = "<strong>System Error:</strong> Server returned invalid data.";
+                                document.getElementById(loadingId).style.color = "#dc2626";
+                                return;
+                            }
+                            
                             const responseElement = document.getElementById(loadingId);
                             
                             if (data.success) {
-                                responseElement.innerHTML = "<strong>Validated Formula:</strong><br><br><code>" + data.text + "</code>";
+                                responseElement.innerHTML = "<strong>Validated Formula:</strong><br><br><code>" + data.text.replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</code>";
                             } else {
                                 responseElement.innerHTML = "<strong>Error:</strong><br>" + data.text;
-                                responseElement.style.color = "#dc2626"; // red text for failure
+                                responseElement.style.color = "#dc2626";
                             }
                         } catch (e) {
                             document.getElementById(loadingId).innerText = 'System Error: Could not connect to the NetSuite backend.';
+                            document.getElementById(loadingId).style.color = "#dc2626";
                         }
                         history.scrollTop = history.scrollHeight;
                     });
 
-                    // Allow pressing Enter to send
+                    // Allow pressing Enter to send without reloading the page
                     document.getElementById('user-input').addEventListener('keypress', function (e) {
                         if (e.key === 'Enter') {
+                            e.preventDefault(); // Crucial to prevent standard submission
                             document.getElementById('send-btn').click();
                         }
                     });
@@ -247,23 +265,32 @@ function (serverWidget, llm, search, query) {
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
-            // Handle AJAX POST requests as an API
+            // Tell the browser to expect a JSON response, not a web page
+            context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
+            
             let userQuery = '';
             
             try {
-                // Parse the JSON body sent by the frontend fetch
-                const reqBody = JSON.parse(context.request.body);
-                userQuery = reqBody.query;
+                if (context.request.body) {
+                    const reqBody = JSON.parse(context.request.body);
+                    userQuery = reqBody.query || '';
+                }
             } catch (e) {
-                // Fallback if formatting is off
-                userQuery = context.request.parameters.query || '';
+                // Failsafe parsing
+            }
+
+            // Immediately reject if empty (this prevents the Cohere 'Unexpected Error' crash)
+            if (!userQuery) {
+                context.response.write(JSON.stringify({ 
+                    success: false, 
+                    text: "No query received by the server. Please check your submission." 
+                }));
+                return;
             }
 
             let finalFormula = '';
             let validationAttempts = 0;
             const maxAttempts = 3;
-
-            context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
 
             try {
                 // Architectural Step 1: Vectorize
@@ -278,13 +305,13 @@ function (serverWidget, llm, search, query) {
                 
                 const ragDocuments = contextRecords.map((rec, index) => {
                     return llm.createDocument({
-                        id: 'doc_' + index,
-                        data: 'Description: ' + rec.description + '\\nSyntax: ' + rec.syntax
+                        id: `doc_${index}`,
+                        data: `Description: ${rec.description}\nSyntax: ${rec.syntax}`
                     });
                 });
 
                 // Architectural Step 3: Generation and Strict Validation Loop
-                let currentPrompt = 'You are a NetSuite PL/SQL expert. Write a NetSuite saved search formula for the following request: ' + userQuery + '. Return ONLY the raw formula text without markdown formatting or conversational filler.';
+                let currentPrompt = `You are a NetSuite PL/SQL expert. Write a NetSuite saved search formula for the following request: ${userQuery}. Return ONLY the raw formula text without markdown formatting or conversational filler.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
@@ -307,7 +334,7 @@ function (serverWidget, llm, search, query) {
                         break; 
                     } else {
                         validationAttempts++;
-                        currentPrompt = 'You previously generated this formula: ' + generatedText + '. It resulted in the following NetSuite compilation error: ' + validation.error + '. Please fix the syntax, resolve the error, and return ONLY the corrected raw formula text.';
+                        currentPrompt = `You previously generated this formula: ${generatedText}. It resulted in the following NetSuite compilation error: ${validation.error}. Please fix the syntax, resolve the error, and return ONLY the corrected raw formula text.`;
                     }
                 }
 
@@ -321,6 +348,7 @@ function (serverWidget, llm, search, query) {
                 }
 
             } catch (err) {
+                // If N/llm throws any other system errors, catch and return them cleanly to the UI
                 context.response.write(JSON.stringify({ success: false, text: err.message }));
             }
         }
