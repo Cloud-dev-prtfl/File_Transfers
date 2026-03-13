@@ -3,8 +3,6 @@
  * @NScriptType Suitelet
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot
- * Utilizes N/llm, Retrieval-Augmented Generation (RAG) architecture, 
- * and programmatic search validation via N/search.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -26,11 +24,7 @@ function (serverWidget, llm, search, query) {
         try {
             const formulaSearch = search.create({
                 type: 'customrecord_ns_formula_lib',
-                columns: [
-                    'custrecord_formula_description', 
-                    'custrecord_formula_syntax', 
-                    'custrecord_formula_embedding'
-                ]
+                columns: ['custrecord_formula_description', 'custrecord_formula_syntax', 'custrecord_formula_embedding']
             });
 
             formulaSearch.run().each(result => {
@@ -49,7 +43,6 @@ function (serverWidget, llm, search, query) {
             });
         } catch (e) {
             // Fails gracefully if the custom record doesn't exist yet
-            log.error('RAG Search Error', 'Formula Library Record may not exist: ' + e.message);
             return [];
         }
 
@@ -60,15 +53,9 @@ function (serverWidget, llm, search, query) {
         try {
             const testSearch = search.create({
                 type: search.Type.CUSTOMER,
-                filters: [['internalid', 'anyof', '@NONE@']], // Force instant return (0 results)
-                columns: [
-                    search.createColumn({
-                        name: 'formulatext',
-                        formula: formulaString
-                    })
-                ] 
+                filters: [['internalid', 'anyof', '@NONE@']],
+                columns: [ search.createColumn({ name: 'formulatext', formula: formulaString }) ] 
             });
-            // Calling getRange forces NetSuite to compile the formula against the database
             testSearch.run().getRange({ start: 0, end: 1 });
             return { isValid: true, error: null };
         } catch (e) {
@@ -89,8 +76,8 @@ function (serverWidget, llm, search, query) {
                     .message { max-width: 75%; padding: 14px 18px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
                     .message.bot { background-color: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 20px 20px 20px 4px; }
                     .message.user { background-color: #ffffff; align-self: flex-end; border: 1px solid #e2e8f0; border-radius: 20px 20px 4px 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-                    .input-container { display: flex; gap: 12px; }
-                    .chat-input { flex-grow: 1; padding: 16px 20px; border: 1px solid #cbd5e1; border-radius: 30px; outline: none; }
+                    .input-container { display: flex; gap: 12px; align-items: center; }
+                    .chat-input { flex-grow: 1; padding: 16px 20px; border: 1px solid #cbd5e1; border-radius: 30px; outline: none; resize: none; overflow: hidden; font-family: inherit; }
                     .send-btn { background-color: #1d4ed8; color: white; border: none; padding: 16px 30px; border-radius: 30px; font-weight: 600; cursor: pointer; }
                     .loading-dots:after { content: '.'; animation: dots 1.5s steps(5, end) infinite; }
                     @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } 80%, 100% { content: ''; } }
@@ -101,11 +88,16 @@ function (serverWidget, llm, search, query) {
                         <div class="message bot">I am Jules. My multi-agent pipeline is active. How can I help you today?</div>
                     </div>
                     <div class="input-container">
-                        <input type="text" id="user-input" class="chat-input" placeholder="Example: Create a saved search for customers in California..." autocomplete="off" />
+                        <textarea id="user-input" class="chat-input" rows="1" placeholder="Example: Create a saved search for customers in California..."></textarea>
                         <button type="button" id="send-btn" class="send-btn">Send to MAS</button>
                     </div>
                 </div>
                 <script>
+                    // FORCE NetSuite's form to never submit natively
+                    if (document.forms.length > 0) {
+                        document.forms[0].onsubmit = function(e) { e.preventDefault(); return false; };
+                    }
+
                     document.getElementById('send-btn').addEventListener('click', async (e) => {
                         e.preventDefault(); 
                         const inputEl = document.getElementById('user-input');
@@ -134,13 +126,18 @@ function (serverWidget, llm, search, query) {
                                 responseElement.innerHTML = "<strong>Error:</strong><br>" + data.text;
                                 responseElement.style.color = "#dc2626";
                             }
-                        } catch (e) {
+                        } catch (err) {
                             document.getElementById(loadingId).innerText = 'System Error: UI could not connect to backend.';
                         }
                         history.scrollTop = history.scrollHeight;
                     });
-                    document.getElementById('user-input').addEventListener('keypress', function (e) {
-                        if (e.key === 'Enter') { e.preventDefault(); document.getElementById('send-btn').click(); }
+
+                    // Capture Enter key manually in the textarea
+                    document.getElementById('user-input').addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' && !e.shiftKey) { 
+                            e.preventDefault(); 
+                            document.getElementById('send-btn').click(); 
+                        }
                     });
                 </script>`;
             
@@ -154,29 +151,24 @@ function (serverWidget, llm, search, query) {
                 if (context.request.body) {
                     userQuery = JSON.parse(context.request.body).query || '';
                 }
-            } catch (e) {}
+            } catch (e) {
+                // If it wasn't JSON, it's a critical breakdown
+                return context.response.write(JSON.stringify({ success: false, text: "Error: Received malformed data." }));
+            }
 
             if (!userQuery) {
                 return context.response.write(JSON.stringify({ success: false, text: "No query received." }));
             }
 
             try {
-                // Step 1: Vectorize (Omitted specific Embed Model to let NetSuite default safely)
-                let userQueryVector;
-                try {
-                    const queryEmbeddingResponse = llm.embed({ inputs: [userQuery] });
-                    userQueryVector = queryEmbeddingResponse.embeddings[0]; 
-                } catch(embedErr) {
-                    throw new Error("Vectorization Failed: " + embedErr.message);
-                }
+                // Step 1: Vectorize
+                const queryEmbeddingResponse = llm.embed({ inputs: [userQuery], embedModelFamily: llm.EmbedModelFamily.COHERE_EMBED });
+                const userQueryVector = queryEmbeddingResponse.embeddings[0]; 
 
                 // Step 2: RAG Retrieval
                 const contextRecords = retrieveRelevantFormulas(userQueryVector);
                 const ragDocuments = contextRecords.map((rec, index) => {
-                    return llm.createDocument({
-                        id: 'doc_' + index,
-                        data: 'Description: ' + rec.description + '\\nSyntax: ' + rec.syntax
-                    });
+                    return llm.createDocument({ id: 'doc_' + index, data: 'Description: ' + rec.description + '\\nSyntax: ' + rec.syntax });
                 });
 
                 // Step 3: Generation & Loop
@@ -188,28 +180,16 @@ function (serverWidget, llm, search, query) {
                 while (validationAttempts < 3) {
                     const generateParams = {
                         prompt: currentPrompt,
+                        modelFamily: llm.ModelFamily.COHERE_COMMAND, // Explicitly defined to prevent 'Unexpected Error'
                         modelParameters: { temperature: 0.1, maxTokens: 1000 }
                     };
                     
-                    // CRITICAL FIX: Only attach documents if array is NOT empty.
-                    // Also attempt to use proper RAG models if available.
+                    // Only pass documents array if it's not empty, otherwise N/llm crashes
                     if (ragDocuments.length > 0) {
                         generateParams.documents = ragDocuments;
-                        if (llm.ModelFamily && llm.ModelFamily.COHERE_COMMAND_R) {
-                            generateParams.modelFamily = llm.ModelFamily.COHERE_COMMAND_R;
-                        } else if (llm.ModelFamily && llm.ModelFamily.COHERE_COMMAND) {
-                            generateParams.modelFamily = llm.ModelFamily.COHERE_COMMAND;
-                        }
                     }
 
-                    let llmResponse;
-                    try {
-                        llmResponse = llm.generateText(generateParams);
-                    } catch (genErr) {
-                        throw new Error("Text Generation Failed: " + genErr.message);
-                    }
-
-                    // Strip markdown blocks if the LLM still tries to add them
+                    const llmResponse = llm.generateText(generateParams);
                     let generatedText = llmResponse.text.trim();
                     generatedText = generatedText.replace(/^```sql\n?/i, '').replace(/^```\n?/i, '').replace(/```$/i, '').trim();
 
@@ -232,10 +212,10 @@ function (serverWidget, llm, search, query) {
                 }
 
             } catch (err) {
-                // If it fails now, the UI will print EXACTLY what caused it!
+                // Capture strict detailed error for debugging
                 context.response.write(JSON.stringify({ 
                     success: false, 
-                    text: "Detailed Execution Error: " + err.message 
+                    text: err.message || "Unknown NetSuite LLM Error Occurred." 
                 }));
             }
         }
