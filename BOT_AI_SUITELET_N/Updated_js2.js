@@ -124,7 +124,7 @@ function (serverWidget, llm, search, query) {
             #bot-workspace { position: relative; display: flex; justify-content: center; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
             
             /* Quota Badge Styles */
-            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 320px; overflow: hidden; z-index: 10; }
+            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 380px; overflow: hidden; z-index: 10; }
             .quota-header-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; cursor: pointer; transition: background-color 0.2s; }
             .quota-header-row:hover { background-color: #f8f9fa; }
             .quota-header { color: #4d5f7a; font-size: 13px; font-weight: bold; margin-right: 15px; }
@@ -153,7 +153,7 @@ function (serverWidget, llm, search, query) {
         <div id="bot-workspace">
             <div class="quota-badge">
                 <div class="quota-header-row" onclick="toggleQuotaDetails()">
-                    <div class="quota-header">⚡ Remaining AI Usage</div>
+                    <div class="quota-header">⚡ Remaining AI Usage : ${genQuota} Gen | ${embedQuota} emb</div>
                     <div class="quota-toggle" id="quota-toggle-icon">▼</div>
                 </div>
                 <div class="quota-details" id="quota-details-content">
