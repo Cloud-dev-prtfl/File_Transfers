@@ -4,7 +4,7 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic SuiteQL custom field extraction, usage quota limits/display, and an asynchronous conversational frontend.
+ * dynamic SuiteQL custom field extraction, collapsible usage quota limits/display, and an asynchronous conversational frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -122,9 +122,16 @@ function (serverWidget, llm, search, query) {
         return `
         <style>
             #bot-workspace { position: relative; display: flex; justify-content: center; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 260px; }
-            .quota-header { color: #4d5f7a; font-size: 13px; font-weight: bold; margin-bottom: 6px; }
-            .quota-details { font-size: 11px; color: #7f8c8d; line-height: 1.5; }
+            
+            /* Quota Badge Styles */
+            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 300px; overflow: hidden; }
+            .quota-header-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; cursor: pointer; transition: background-color 0.2s; }
+            .quota-header-row:hover { background-color: #f8f9fa; }
+            .quota-header { color: #4d5f7a; font-size: 13px; font-weight: bold; margin-right: 15px; }
+            .quota-toggle { font-size: 10px; color: #7f8c8d; user-select: none; transition: transform 0.3s ease; }
+            .quota-details { display: none; padding: 12px 14px; background-color: #fafbfc; border-top: 1px solid #eaedf0; font-size: 12px; color: #5c6bc0; line-height: 1.5; }
+            
+            /* Chat Container Styles */
             #chat-container { width: 100%; max-width: 850px; border: 1px solid #d3d8db; border-radius: 12px; display: flex; flex-direction: column; height: 65vh; min-height: 500px; background-color: #f4f6f9; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
             #chat-messages { flex-grow: 1; padding: 25px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
             .chat-message { max-width: 85%; padding: 14px 18px; border-radius: 8px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
@@ -145,12 +152,16 @@ function (serverWidget, llm, search, query) {
 
         <div id="bot-workspace">
             <div class="quota-badge">
-                <div class="quota-header">⚡ Remaining Free Usage: ${genQuota} Gen | ${embedQuota} Embed</div>
-                <div class="quota-details">
-                    <strong>Gen:</strong> How many more words/formulas the bot can write this month.<br>
-                    <strong>Embed:</strong> How many more times the bot can search the formula library.
+                <div class="quota-header-row" onclick="toggleQuotaDetails()">
+                    <div class="quota-header">⚡ Usage: ${genQuota} Gen | ${embedQuota} Embed</div>
+                    <div class="quota-toggle" id="quota-toggle-icon">▼</div>
+                </div>
+                <div class="quota-details" id="quota-details-content">
+                    <strong style="color: #333;">Gen:</strong> How many more AI operations (like writing formulas) the bot can perform this month.<br><br>
+                    <strong style="color: #333;">Embed:</strong> How many more times the bot can search the formula library this month.
                 </div>
             </div>
+            
             <div id="chat-container">
                 <div id="chat-messages">
                     <div class="chat-message bot-msg">
@@ -166,6 +177,20 @@ function (serverWidget, llm, search, query) {
         </div>
 
         <script>
+            // UI Toggle Logic
+            function toggleQuotaDetails() {
+                const details = document.getElementById('quota-details-content');
+                const icon = document.getElementById('quota-toggle-icon');
+                if (details.style.display === 'block') {
+                    details.style.display = 'none';
+                    icon.innerHTML = '▼';
+                } else {
+                    details.style.display = 'block';
+                    icon.innerHTML = '▲';
+                }
+            }
+
+            // Core Chat Logic
             async function sendQuery() {
                 const inputField = document.getElementById('chat-input');
                 const sendBtn = document.getElementById('send-btn');
