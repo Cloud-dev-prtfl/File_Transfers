@@ -5,7 +5,7 @@
  * * Architectural Blueprint: Autonomous Saved Search Generator Bot (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), SuiteScript JSON creation,
  * active search.save() validation, dynamic SuiteQL custom field extraction, usage quota limits, 
- * Out-Of-Domain (OOD) protection, and an asynchronous conversational frontend.
+ * Out-Of-Domain (OOD) protection, dynamic search naming, and an asynchronous conversational frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -293,7 +293,6 @@ function (serverWidget, llm, search, query) {
                 });
             }
 
-            // FIXED: Ensure numbers/objects are safely converted to strings before replacing
             function escapeHtml(unsafe) {
                 if (unsafe === null || unsafe === undefined) return '';
                 return String(unsafe)
@@ -380,7 +379,8 @@ function (serverWidget, llm, search, query) {
                 } catch (extractionErr) {}
 
                 // Step 3: Generation & Active Save Validation
-                let currentPrompt = `You are a strict NetSuite SuiteScript 2.x expert bot. Analyze the request: "${userQuery}". If this is conversational or completely unrelated to NetSuite saved searches, reply with exactly: "OOD_REQUEST". Otherwise, generate the JSON configuration required for 'search.create(options)'. The JSON MUST strictly contain 'type' (a string internal id like 'salesorder', 'customer', etc.), 'filters' (a valid array of filter expressions/objects), and 'columns' (an array of strings or column objects). DO NOT include 'id' or 'title' in the JSON.${customFieldMappingText} Return ONLY the raw, valid JSON object (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                // UPDATED PROMPT: Specifically instruct the LLM to generate a relevant 'title' property inside the JSON based on the user's prompt.
+                let currentPrompt = `You are a strict NetSuite SuiteScript 2.x expert bot. Analyze the request: "${userQuery}". If this is conversational or completely unrelated to NetSuite saved searches, reply with exactly: "OOD_REQUEST". Otherwise, generate the JSON configuration required for 'search.create(options)'. The JSON MUST strictly contain 'type' (a string internal id like 'salesorder', 'customer', etc.), 'filters' (a valid array of filter expressions/objects), 'columns' (an array of strings or column objects), and a 'title' (a concise, descriptive name based on the user's request, e.g., 'Top 10 Sellers This Week'). DO NOT include an 'id' in the JSON.${customFieldMappingText} Return ONLY the raw, valid JSON object (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
@@ -398,24 +398,23 @@ function (serverWidget, llm, search, query) {
                     }
                     
                     try {
-                        // Clean markdown formatting if LLM disobeys
                         if (generatedText.startsWith('```')) {
                             generatedText = generatedText.replace(/^```(json)?/gi, '').replace(/```$/gi, '').trim();
                         }
                         
                         const parsedSearchConfig = JSON.parse(generatedText);
                         
-                        // Dynamically inject the requested formatting
                         const timestamp = new Date().getTime();
                         parsedSearchConfig.id = `customsearch_ai_bot_${timestamp}`;
-                        parsedSearchConfig.title = `AI Generated Search ${getFormattedDateString()}`;
+                        
+                        // Extract the AI-generated name (or fallback) and append the unique date stamp
+                        const llmGeneratedTitle = parsedSearchConfig.title || 'AI Generated Search';
+                        parsedSearchConfig.title = `${llmGeneratedTitle} ${getFormattedDateString()}`;
 
-                        // The ultimate validation: Attempt to actually create and save it in NetSuite
                         const newSearch = search.create(parsedSearchConfig);
                         createdSavedSearchId = newSearch.save(); 
                         createdSearchName = parsedSearchConfig.title;
                         
-                        // If it successfully saves without throwing an error, we break the loop
                         finalSearchCode = JSON.stringify(parsedSearchConfig, null, 4);
                         break; 
 
@@ -428,7 +427,6 @@ function (serverWidget, llm, search, query) {
                 // Prepare API Response
                 if (createdSavedSearchId) {
                     responsePayload.success = true;
-                    // Stringify the numeric ID to prevent frontend UI crashes
                     responsePayload.savedSearchId = String(createdSavedSearchId); 
                     responsePayload.searchName = createdSearchName;
                     responsePayload.searchCode = finalSearchCode;
