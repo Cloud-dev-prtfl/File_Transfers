@@ -34,7 +34,7 @@ function (serverWidget, llm, search, query) {
         let hours = d.getHours();
         let ampm = hours >= 12 ? 'PM' : 'AM';
         hours = hours % 12;
-        hours = hours ? hours : 12; // the hour '0' should be '12'
+        hours = hours ? hours : 12; 
         let minutes = d.getMinutes().toString().padStart(2, '0');
         
         return `(${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()} , ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}, ${d.getFullYear()})`;
@@ -141,9 +141,11 @@ function (serverWidget, llm, search, query) {
             .user-msg { background-color: #607799; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
             .bot-msg { background-color: white; border: 1px solid #e1e5e8; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; width: 100%; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
             .bot-msg pre { background-color: #2b303b; color: #c0c5ce; padding: 15px; border-radius: 6px; overflow-x: auto; font-family: 'Courier New', Courier, monospace; margin: 12px 0; font-size: 13px; }
-            .copy-btn { background-color: #e0e6ed; color: #333; border: 1px solid #cdd4dc; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s; }
-            .copy-btn:hover { background-color: #d1d8e0; }
-            .search-id-badge { display: inline-block; background-color: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 4px; font-weight: bold; margin-bottom: 10px; border: 1px solid #c8e6c9;}
+            .action-btn { background-color: #e0e6ed; color: #333; border: 1px solid #cdd4dc; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s; }
+            .action-btn:hover { background-color: #d1d8e0; }
+            .action-btn.view-btn { background-color: #2e7d32; color: white; border-color: #1b5e20; }
+            .action-btn.view-btn:hover { background-color: #1b5e20; }
+            .search-id-badge { display: inline-block; background-color: #e8f5e9; color: #2e7d32; padding: 6px 10px; border-radius: 4px; font-weight: bold; margin-bottom: 8px; border: 1px solid #c8e6c9; font-size: 13px;}
             #chat-input-area { display: flex; padding: 15px 20px; background-color: white; border-top: 1px solid #d3d8db; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; align-items: center; gap: 10px; }
             #chat-input { flex-grow: 1; padding: 12px 15px; border: 1px solid #cdd4dc; border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; }
             #chat-input:focus { border-color: #607799; }
@@ -152,6 +154,7 @@ function (serverWidget, llm, search, query) {
             #send-btn:hover { background-color: #3b495e; }
             #send-btn:disabled { background-color: #a0abbc; cursor: not-allowed; }
             .typing-indicator { font-style: italic; color: #7f8c8d; font-size: 13px; }
+            .button-row { display: flex; gap: 10px; margin-top: 10px; }
         </style>
 
         <div id="bot-workspace">
@@ -221,13 +224,20 @@ function (serverWidget, llm, search, query) {
                     if (data.success) {
                         const codeId = 'code-' + Date.now();
                         const htmlResponse = \`
-                            <strong>✅ Saved Search Created Successfully!</strong><br>
-                            <div class="search-id-badge">Saved Search ID: \${escapeHtml(data.savedSearchId)}</div><br>
+                            <strong>✅ Saved Search Created Successfully!</strong><br><br>
+                            <div class="search-id-badge">Name: \${escapeHtml(data.searchName)}</div><br>
+                            <div class="search-id-badge">Internal ID: \${escapeHtml(data.savedSearchId)}</div><br>
                             <em>Review the generated configuration below:</em>
                             <pre id="\${codeId}">\${escapeHtml(data.searchCode)}</pre>
-                            <button type="button" class="copy-btn" onclick="copyToClipboard('\${codeId}', this)">
-                                📋 Copy JSON Config
-                            </button>
+                            
+                            <div class="button-row">
+                                <button type="button" class="action-btn" onclick="copyToClipboard('\${codeId}', this)">
+                                    📋 Copy JSON Config
+                                </button>
+                                <button type="button" class="action-btn view-btn" onclick="window.open('/app/common/search/searchresults.nl?searchid=\${data.savedSearchId}', '_blank')">
+                                    👁️ View Search
+                                </button>
+                            </div>
                         \`;
                         appendHtmlMessage(htmlResponse, 'bot-msg');
                     } else {
@@ -283,8 +293,15 @@ function (serverWidget, llm, search, query) {
                 });
             }
 
+            // FIXED: Ensure numbers/objects are safely converted to strings before replacing
             function escapeHtml(unsafe) {
-                return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                if (unsafe === null || unsafe === undefined) return '';
+                return String(unsafe)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
             }
         </script>
         `;
@@ -315,7 +332,7 @@ function (serverWidget, llm, search, query) {
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
-            let responsePayload = { success: false, searchCode: '', savedSearchId: '', error: '' };
+            let responsePayload = { success: false, searchCode: '', savedSearchId: '', searchName: '', error: '' };
 
             if (isQuotaExhausted) {
                 responsePayload.error = "The AI Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month.";
@@ -330,6 +347,7 @@ function (serverWidget, llm, search, query) {
 
                 let finalSearchCode = '';
                 let createdSavedSearchId = '';
+                let createdSearchName = '';
                 let validationAttempts = 0;
                 const maxAttempts = 3;
 
@@ -395,6 +413,7 @@ function (serverWidget, llm, search, query) {
                         // The ultimate validation: Attempt to actually create and save it in NetSuite
                         const newSearch = search.create(parsedSearchConfig);
                         createdSavedSearchId = newSearch.save(); 
+                        createdSearchName = parsedSearchConfig.title;
                         
                         // If it successfully saves without throwing an error, we break the loop
                         finalSearchCode = JSON.stringify(parsedSearchConfig, null, 4);
@@ -409,7 +428,9 @@ function (serverWidget, llm, search, query) {
                 // Prepare API Response
                 if (createdSavedSearchId) {
                     responsePayload.success = true;
-                    responsePayload.savedSearchId = createdSavedSearchId;
+                    // Stringify the numeric ID to prevent frontend UI crashes
+                    responsePayload.savedSearchId = String(createdSavedSearchId); 
+                    responsePayload.searchName = createdSearchName;
                     responsePayload.searchCode = finalSearchCode;
                 } else if (!responsePayload.error) {
                     responsePayload.error = "Unable to generate and save a valid NetSuite Search after 3 iterative attempts. Please refine the input prompt to be more specific.";
