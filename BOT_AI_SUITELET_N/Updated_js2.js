@@ -4,7 +4,7 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic SuiteQL custom field extraction, and an asynchronous conversational frontend.
+ * dynamic SuiteQL custom field extraction, usage quota limits, and an asynchronous conversational frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -65,7 +65,7 @@ function (serverWidget, llm, search, query) {
         }
     };
 
-    // --- NEW: Agentic Extraction Backend Functions (Option 3) ---
+    // --- Agentic Extraction Backend Functions ---
 
     const extractFieldNames = (userQuery) => {
         const extractionPrompt = `Extract potential custom field names or labels from the following request. Return ONLY a valid JSON array of strings representing the field names. Do not include markdown, formatting, or explanations. Request: "${userQuery}"`;
@@ -78,13 +78,12 @@ function (serverWidget, llm, search, query) {
             });
             
             let text = llmResponse.text.trim();
-            // Clean up any markdown code blocks if the LLM disobeys instructions
             if (text.startsWith('```')) {
                 text = text.replace(/```(json)?/g, '').trim();
             }
             return JSON.parse(text);
         } catch (e) {
-            return []; // Fail gracefully if parsing errors out
+            return []; 
         }
     };
 
@@ -93,7 +92,6 @@ function (serverWidget, llm, search, query) {
         const mapping = {};
         
         try {
-            // Build dynamic parameterized SuiteQL query
             const placeholders = fieldNames.map(() => '?').join(', ');
             const sql = `SELECT scriptid, name FROM customfield WHERE name IN (${placeholders})`;
             
@@ -113,7 +111,14 @@ function (serverWidget, llm, search, query) {
 
     // --- UI HTML/CSS/JS Payload ---
 
-    const generateChatbotUI = () => {
+    const generateChatbotUI = (isQuotaExhausted) => {
+        const botGreeting = isQuotaExhausted 
+            ? 'The AI Formula Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.' 
+            : 'Hello! I am ready to generate and validate complex saved search formulas for you. What logic do you need help writing today?';
+        
+        const disableInputAttr = isQuotaExhausted ? 'disabled' : '';
+        const placeholderText = isQuotaExhausted ? 'Quota exhausted. Bot unavailable.' : 'e.g., Calculate days between date created and closed...';
+
         return `
         <style>
             #bot-workspace { display: flex; justify-content: center; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -128,6 +133,7 @@ function (serverWidget, llm, search, query) {
             #chat-input-area { display: flex; padding: 15px 20px; background-color: white; border-top: 1px solid #d3d8db; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; align-items: center; gap: 10px; }
             #chat-input { flex-grow: 1; padding: 12px 15px; border: 1px solid #cdd4dc; border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; }
             #chat-input:focus { border-color: #607799; }
+            #chat-input:disabled { background-color: #f0f2f5; cursor: not-allowed; }
             #send-btn { background-color: #4d5f7a; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background-color 0.2s; }
             #send-btn:hover { background-color: #3b495e; }
             #send-btn:disabled { background-color: #a0abbc; cursor: not-allowed; }
@@ -139,12 +145,12 @@ function (serverWidget, llm, search, query) {
                 <div id="chat-messages">
                     <div class="chat-message bot-msg">
                         <strong>NetSuite AI Formula Bot</strong><br>
-                        Hello! I am ready to generate and validate complex saved search formulas for you. What logic do you need help writing today?
+                        ${botGreeting}
                     </div>
                 </div>
                 <div id="chat-input-area">
-                    <input type="text" id="chat-input" placeholder="e.g., Calculate days between date created and closed..." onkeypress="if(event.key === 'Enter') sendQuery()" />
-                    <button id="send-btn" onclick="sendQuery()">Generate</button>
+                    <input type="text" id="chat-input" placeholder="${placeholderText}" onkeypress="if(event.key === 'Enter') sendQuery()" ${disableInputAttr} />
+                    <button id="send-btn" onclick="sendQuery()" ${disableInputAttr}>Generate</button>
                 </div>
             </div>
         </div>
@@ -250,6 +256,19 @@ function (serverWidget, llm, search, query) {
      * Primary Suitelet Request Handler executing the architectural flow.
      */
     const onRequest = (context) => {
+        // Evaluate AI Usage Quotas
+        let isQuotaExhausted = false;
+        try {
+            const remainingGenUsage = llm.getRemainingFreeUsage();
+            const remainingEmbedUsage = llm.getRemainingFreeEmbedUsage();
+            if (remainingGenUsage <= 0 || remainingEmbedUsage <= 0) {
+                isQuotaExhausted = true;
+            }
+        } catch (e) {
+            // Failsafe: If the quota check errors out, assume availability to prevent false blocking
+            isQuotaExhausted = false;
+        }
+
         if (context.request.method === 'GET') {
             // Render the Chat UI wrapper
             const form = serverWidget.createForm({ title: 'AI Formula Assistant', hideNavBar: false });
@@ -260,15 +279,21 @@ function (serverWidget, llm, search, query) {
                 label: 'Chat UI'
             });
             
-            htmlField.defaultValue = generateChatbotUI();
+            htmlField.defaultValue = generateChatbotUI(isQuotaExhausted);
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
             // Act as an API endpoint for the frontend Javascript
             let responsePayload = { success: false, formula: '', error: '' };
 
+            if (isQuotaExhausted) {
+                responsePayload.error = "The AI Formula Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.";
+                context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
+                context.response.write(JSON.stringify(responsePayload));
+                return; 
+            }
+
             try {
-                // Parse the JSON payload sent via fetch()
                 const requestBody = JSON.parse(context.request.body);
                 const userQuery = requestBody.query;
 
@@ -292,7 +317,7 @@ function (serverWidget, llm, search, query) {
                     });
                 });
 
-                // --- NEW: Architectural Step 2.5: Agentic Field Extraction (Option 3) ---
+                // Architectural Step 2.5: Agentic Field Extraction
                 let customFieldMappingText = "";
                 try {
                     const potentialFields = extractFieldNames(userQuery);
