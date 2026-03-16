@@ -4,7 +4,7 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic SuiteQL custom field extraction, usage quota limits, and an asynchronous conversational frontend.
+ * dynamic SuiteQL custom field extraction, usage quota limits/display, and an asynchronous conversational frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -111,7 +111,7 @@ function (serverWidget, llm, search, query) {
 
     // --- UI HTML/CSS/JS Payload ---
 
-    const generateChatbotUI = (isQuotaExhausted) => {
+    const generateChatbotUI = (isQuotaExhausted, genQuota, embedQuota) => {
         const botGreeting = isQuotaExhausted 
             ? 'The AI Formula Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.' 
             : 'Hello! I am ready to generate and validate complex saved search formulas for you. What logic do you need help writing today?';
@@ -121,7 +121,8 @@ function (serverWidget, llm, search, query) {
 
         return `
         <style>
-            #bot-workspace { display: flex; justify-content: center; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+            #bot-workspace { position: relative; display: flex; justify-content: center; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; color: #607799; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
             #chat-container { width: 100%; max-width: 850px; border: 1px solid #d3d8db; border-radius: 12px; display: flex; flex-direction: column; height: 65vh; min-height: 500px; background-color: #f4f6f9; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
             #chat-messages { flex-grow: 1; padding: 25px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
             .chat-message { max-width: 85%; padding: 14px 18px; border-radius: 8px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
@@ -141,6 +142,9 @@ function (serverWidget, llm, search, query) {
         </style>
 
         <div id="bot-workspace">
+            <div class="quota-badge">
+                ⚡ Monthly Quota: ${genQuota} Gen | ${embedQuota} Embed
+            </div>
             <div id="chat-container">
                 <div id="chat-messages">
                     <div class="chat-message bot-msg">
@@ -202,6 +206,8 @@ function (serverWidget, llm, search, query) {
                     document.getElementById(loadingId).remove();
                     appendMessage('⚠️ System Error: ' + error.message, 'bot-msg');
                 } finally {
+                    // Note: If they hit the quota limit during this request, they might need to refresh
+                    // to see the disabled UI, but they will still get the proper error message in chat.
                     inputField.disabled = false;
                     sendBtn.disabled = false;
                     inputField.focus();
@@ -258,10 +264,13 @@ function (serverWidget, llm, search, query) {
     const onRequest = (context) => {
         // Evaluate AI Usage Quotas
         let isQuotaExhausted = false;
+        let genQuota = 'N/A';
+        let embedQuota = 'N/A';
+        
         try {
-            const remainingGenUsage = llm.getRemainingFreeUsage();
-            const remainingEmbedUsage = llm.getRemainingFreeEmbedUsage();
-            if (remainingGenUsage <= 0 || remainingEmbedUsage <= 0) {
+            genQuota = llm.getRemainingFreeUsage();
+            embedQuota = llm.getRemainingFreeEmbedUsage();
+            if (genQuota <= 0 || embedQuota <= 0) {
                 isQuotaExhausted = true;
             }
         } catch (e) {
@@ -279,7 +288,7 @@ function (serverWidget, llm, search, query) {
                 label: 'Chat UI'
             });
             
-            htmlField.defaultValue = generateChatbotUI(isQuotaExhausted);
+            htmlField.defaultValue = generateChatbotUI(isQuotaExhausted, genQuota, embedQuota);
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
