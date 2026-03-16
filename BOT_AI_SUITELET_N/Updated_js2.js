@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType Suitelet
  * @NModuleScope SameAccount
- * * Architectural Blueprint: High-Accuracy Formula Generator Bot (Chat UI Edition)
+ * * Architectural Blueprint: High-Accuracy Formula Generator BOT (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
  * dynamic SuiteQL custom field extraction, collapsible usage quota limits/display, and an asynchronous conversational frontend.
  */
@@ -113,11 +113,11 @@ function (serverWidget, llm, search, query) {
 
     const generateChatbotUI = (isQuotaExhausted, genQuota, embedQuota) => {
         const botGreeting = isQuotaExhausted 
-            ? 'The AI Formula Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.' 
+            ? 'The AI Formula BOT is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.' 
             : 'Hello! I am ready to generate and validate complex saved search formulas for you. What logic do you need help writing today?';
         
         const disableInputAttr = isQuotaExhausted ? 'disabled' : '';
-        const placeholderText = isQuotaExhausted ? 'Quota exhausted. Bot unavailable.' : 'e.g., Calculate days between date created and closed...';
+        const placeholderText = isQuotaExhausted ? 'Quota exhausted. BOT unavailable.' : 'e.g., Calculate days between date created and closed...';
 
         return `
         <style>
@@ -165,7 +165,7 @@ function (serverWidget, llm, search, query) {
             <div id="chat-container">
                 <div id="chat-messages">
                     <div class="chat-message bot-msg">
-                        <strong>NetSuite AI Formula Bot</strong><br>
+                        <strong>NetSuite AI Formula BOT</strong><br>
                         ${botGreeting}
                     </div>
                 </div>
@@ -233,7 +233,7 @@ function (serverWidget, llm, search, query) {
                     } else {
                         // Dynamically adjust the error prefix based on the error context
                         let errorPrefix = '❌ Validation Failed: ';
-                        if (data.error.includes("specialized NetSuite AI Formula Bot")) {
+                        if (data.error.includes("specialized NetSuite AI Formula BOT")) {
                             errorPrefix = '🤖 Notice: ';
                         }
                         appendMessage(errorPrefix + data.error, 'bot-msg');
@@ -330,7 +330,7 @@ function (serverWidget, llm, search, query) {
             let responsePayload = { success: false, formula: '', error: '' };
 
             if (isQuotaExhausted) {
-                responsePayload.error = "The AI Formula Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.";
+                responsePayload.error = "The AI Formula BOT is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.";
                 context.response.setHeader({ name: 'Content-Type', value: 'application/json' });
                 context.response.write(JSON.stringify(responsePayload));
                 return; 
@@ -375,7 +375,7 @@ function (serverWidget, llm, search, query) {
                 }
 
                 // Architectural Step 3: Generation with Out-Of-Domain (OOD) Guardrail
-                let currentPrompt = `You are a strict NetSuite PL/SQL expert bot. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.${customFieldMappingText} Return ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.${customFieldMappingText} Return ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
@@ -389,7 +389,7 @@ function (serverWidget, llm, search, query) {
                     
                     // Intercept off-topic questions instantly
                     if (generatedText.includes('OOD_REQUEST')) {
-                        responsePayload.error = "I am a specialized NetSuite AI Formula Bot. I can only answer questions and generate logic related to NetSuite saved searches and formulas. Please ask me a formula-related question!";
+                        responsePayload.error = "I am a specialized NetSuite AI Formula BOT. I can only answer questions and generate logic related to NetSuite saved searches and formulas. Please ask me a formula-related question!";
                         break; 
                     }
                     
