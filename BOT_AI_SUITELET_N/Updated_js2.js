@@ -389,7 +389,7 @@ function (serverWidget, llm, search, query) {
                     
                     // Intercept off-topic questions instantly
                     if (generatedText.includes('OOD_REQUEST')) {
-                        responsePayload.error = "I am a specialized NetSuite AI Formula BOT. I can only answer questions and generate logic related to NetSuite saved searches and formulas. Please ask me a formula-related question!";
+                        responsePayload.error = "I am a specialized NetSuite AI Formula BOT. I can only answer questions and generate logic related to NetSuite saved searches formulas. Please ask me a formula-related question!";
                         break; 
                     }
                     
