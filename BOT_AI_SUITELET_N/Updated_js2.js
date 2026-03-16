@@ -122,7 +122,9 @@ function (serverWidget, llm, search, query) {
         return `
         <style>
             #bot-workspace { position: relative; display: flex; justify-content: center; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; color: #607799; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+            .quota-badge { position: absolute; top: 20px; left: 20px; background-color: #ffffff; border: 1px solid #d3d8db; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 260px; }
+            .quota-header { color: #4d5f7a; font-size: 13px; font-weight: bold; margin-bottom: 6px; }
+            .quota-details { font-size: 11px; color: #7f8c8d; line-height: 1.5; }
             #chat-container { width: 100%; max-width: 850px; border: 1px solid #d3d8db; border-radius: 12px; display: flex; flex-direction: column; height: 65vh; min-height: 500px; background-color: #f4f6f9; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
             #chat-messages { flex-grow: 1; padding: 25px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
             .chat-message { max-width: 85%; padding: 14px 18px; border-radius: 8px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
@@ -143,7 +145,11 @@ function (serverWidget, llm, search, query) {
 
         <div id="bot-workspace">
             <div class="quota-badge">
-                ⚡ Monthly Quota: ${genQuota} Gen | ${embedQuota} Embed
+                <div class="quota-header">⚡ Remaining Free Usage: ${genQuota} Gen | ${embedQuota} Embed</div>
+                <div class="quota-details">
+                    <strong>Gen:</strong> How many more words/formulas the bot can write this month.<br>
+                    <strong>Embed:</strong> How many more times the bot can search the formula library.
+                </div>
             </div>
             <div id="chat-container">
                 <div id="chat-messages">
@@ -206,8 +212,6 @@ function (serverWidget, llm, search, query) {
                     document.getElementById(loadingId).remove();
                     appendMessage('⚠️ System Error: ' + error.message, 'bot-msg');
                 } finally {
-                    // Note: If they hit the quota limit during this request, they might need to refresh
-                    // to see the disabled UI, but they will still get the proper error message in chat.
                     inputField.disabled = false;
                     sendBtn.disabled = false;
                     inputField.focus();
