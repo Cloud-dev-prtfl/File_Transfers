@@ -4,7 +4,8 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator Bot (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic SuiteQL custom field extraction, collapsible usage quota limits/display, and an asynchronous conversational frontend.
+ * dynamic SuiteQL custom field extraction, usage quota limits, Out-Of-Domain (OOD) protection,
+ * and an asynchronous conversational frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -231,7 +232,12 @@ function (serverWidget, llm, search, query) {
                         \`;
                         appendHtmlMessage(htmlResponse, 'bot-msg');
                     } else {
-                        appendMessage('❌ Validation Failed: ' + data.error, 'bot-msg');
+                        // Dynamically adjust the error prefix based on the error context
+                        let errorPrefix = '❌ Validation Failed: ';
+                        if (data.error.includes("specialized NetSuite AI Formula Bot")) {
+                            errorPrefix = '🤖 Notice: ';
+                        }
+                        appendMessage(errorPrefix + data.error, 'bot-msg');
                     }
                 } catch (error) {
                     document.getElementById(loadingId).remove();
@@ -369,8 +375,9 @@ function (serverWidget, llm, search, query) {
                     // Fail silently here so the main generator loop still runs
                 }
 
-                // Architectural Step 3: Generation and Strict Validation Loop
-                let currentPrompt = `You are a NetSuite PL/SQL expert. Write a NetSuite saved search formula for the following request: ${userQuery}.${customFieldMappingText} Return ONLY the raw formula text without markdown formatting or conversational filler.`;
+                // --- NEW: Architectural Step 3: Generation with Out-Of-Domain (OOD) Guardrail ---
+                // Instruct the LLM to output a specific kill-word if the prompt is entirely unrelated to its primary job
+                let currentPrompt = `You are a strict NetSuite PL/SQL expert bot. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.${customFieldMappingText} Return ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
@@ -381,6 +388,13 @@ function (serverWidget, llm, search, query) {
                     });
 
                     const generatedText = llmResponse.text.trim();
+                    
+                    // Intercept off-topic questions instantly
+                    if (generatedText.includes('OOD_REQUEST')) {
+                        responsePayload.error = "I am a specialized NetSuite AI Formula Bot. I can only answer questions and generate logic related to NetSuite saved searches and formulas. Please ask me a formula-related question!";
+                        break; // Exit the validation loop early
+                    }
+                    
                     const validation = validateFormulaSyntax(generatedText);
                     
                     if (validation.isValid) {
@@ -396,7 +410,8 @@ function (serverWidget, llm, search, query) {
                 if (finalFormula) {
                     responsePayload.success = true;
                     responsePayload.formula = finalFormula;
-                } else {
+                } else if (!responsePayload.error) {
+                    // Only display this if we didn't already display an Out-Of-Domain error
                     responsePayload.error = "Unable to generate a syntactically valid formula after 3 iterative attempts. Please refine the input prompt.";
                 }
 
