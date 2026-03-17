@@ -6,6 +6,7 @@
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), SuiteScript JSON creation,
  * active search.save() validation, dynamic SuiteQL custom field extraction, usage quota limits, 
  * Out-Of-Domain (OOD) protection, dynamic search naming, and an asynchronous conversational frontend.
+ * Includes Graceful Fallback for returning Draft JSON on validation failure.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -155,6 +156,7 @@ function (serverWidget, llm, search, query) {
             #send-btn:disabled { background-color: #a0abbc; cursor: not-allowed; }
             .typing-indicator { font-style: italic; color: #7f8c8d; font-size: 13px; }
             .button-row { display: flex; gap: 10px; margin-top: 10px; }
+            .error-notice { color: #d32f2f; }
         </style>
 
         <div id="bot-workspace">
@@ -241,11 +243,27 @@ function (serverWidget, llm, search, query) {
                         \`;
                         appendHtmlMessage(htmlResponse, 'bot-msg');
                     } else {
-                        let errorPrefix = '❌ Creation Failed: ';
+                        // Handle standard errors vs OOD notices
+                        let errorPrefix = '<span class="error-notice">❌ Creation Failed:</span> ';
                         if (data.error.includes("specialized NetSuite AI")) {
                             errorPrefix = '🤖 Notice: ';
                         }
-                        appendMessage(errorPrefix + data.error, 'bot-msg');
+                        
+                        let errorHtml = \`<strong>\${errorPrefix}</strong><br>\${escapeHtml(data.error)}\`;
+                        
+                        // If we have a draft fallback, render it with a copy button
+                        if (data.draftCode) {
+                            const draftId = 'draft-' + Date.now();
+                            errorHtml += \`<br><br><em>Draft Configuration (Requires Manual Fix):</em>
+                                <pre id="\${draftId}">\${escapeHtml(data.draftCode)}</pre>
+                                <div class="button-row">
+                                    <button type="button" class="action-btn" onclick="copyToClipboard('\${draftId}', this)">
+                                        📋 Copy Draft JSON
+                                    </button>
+                                </div>\`;
+                        }
+                        
+                        appendHtmlMessage(errorHtml, 'bot-msg');
                     }
                 } catch (error) {
                     document.getElementById(loadingId).remove();
@@ -331,7 +349,7 @@ function (serverWidget, llm, search, query) {
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
-            let responsePayload = { success: false, searchCode: '', savedSearchId: '', searchName: '', error: '' };
+            let responsePayload = { success: false, searchCode: '', savedSearchId: '', searchName: '', error: '', draftCode: '' };
 
             if (isQuotaExhausted) {
                 responsePayload.error = "The AI Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month.";
@@ -347,6 +365,7 @@ function (serverWidget, llm, search, query) {
                 let finalSearchCode = '';
                 let createdSavedSearchId = '';
                 let createdSearchName = '';
+                let lastDraftedJson = ''; // Variable to hold the graceful fallback code
                 let validationAttempts = 0;
                 const maxAttempts = 3;
 
@@ -379,7 +398,6 @@ function (serverWidget, llm, search, query) {
                 } catch (extractionErr) {}
 
                 // Step 3: Generation & Active Save Validation
-                // UPDATED PROMPT: Specifically instruct the LLM to generate a relevant 'title' property inside the JSON based on the user's prompt.
                 let currentPrompt = `You are a strict NetSuite SuiteScript 2.x expert bot. Analyze the request: "${userQuery}". If this is conversational or completely unrelated to NetSuite saved searches, reply with exactly: "OOD_REQUEST". Otherwise, generate the JSON configuration required for 'search.create(options)'. The JSON MUST strictly contain 'type' (a string internal id like 'salesorder', 'customer', etc.), 'filters' (a valid array of filter expressions/objects), 'columns' (an array of strings or column objects), and a 'title' (a concise, descriptive name based on the user's request, e.g., 'Top 10 Sellers This Week'). DO NOT include an 'id' in the JSON.${customFieldMappingText} Return ONLY the raw, valid JSON object (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
@@ -407,15 +425,17 @@ function (serverWidget, llm, search, query) {
                         const timestamp = new Date().getTime();
                         parsedSearchConfig.id = `customsearch_ai_bot_${timestamp}`;
                         
-                        // Extract the AI-generated name (or fallback) and append the unique date stamp
                         const llmGeneratedTitle = parsedSearchConfig.title || 'AI Generated Search';
                         parsedSearchConfig.title = `${llmGeneratedTitle} ${getFormattedDateString()}`;
+
+                        // Capture the formatted JSON *before* NetSuite attempts to validate/save it
+                        lastDraftedJson = JSON.stringify(parsedSearchConfig, null, 4);
 
                         const newSearch = search.create(parsedSearchConfig);
                         createdSavedSearchId = newSearch.save(); 
                         createdSearchName = parsedSearchConfig.title;
                         
-                        finalSearchCode = JSON.stringify(parsedSearchConfig, null, 4);
+                        finalSearchCode = lastDraftedJson;
                         break; 
 
                     } catch (e) {
@@ -431,7 +451,9 @@ function (serverWidget, llm, search, query) {
                     responsePayload.searchName = createdSearchName;
                     responsePayload.searchCode = finalSearchCode;
                 } else if (!responsePayload.error) {
-                    responsePayload.error = "Unable to generate and save a valid NetSuite Search after 3 iterative attempts. Please refine the input prompt to be more specific.";
+                    // Fallback triggered: provide the user with the last drafted code
+                    responsePayload.error = "I couldn't successfully save this to NetSuite (likely due to a missing or invalid custom field ID). However, I've generated a draft configuration for you below. You can copy this, update the field names, and use it in your code!";
+                    responsePayload.draftCode = lastDraftedJson;
                 }
 
             } catch (err) {
