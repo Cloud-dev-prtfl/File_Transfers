@@ -1,0 +1,49 @@
+This is an impressive application of NetSuite's N/llm module. Building a RAG-based AI agent natively within NetSuite using SuiteScript to generate Saved Searches is a highly practical and modern use case.
+
+To package your Suitelet, User Event script, custom record schema (customrecord_ns_savedsearches_lib), and the 100 seed data records for deployment to other NetSuite accounts, you have two primary options.
+
+Here is a breakdown of how to bundle this as a deployable product.
+
+Option 1: SuiteBundler (Easiest for Including Data)
+SuiteBundler is NetSuite’s legacy but highly reliable tool for packaging customizations. It is specifically advantageous here because it natively supports migrating custom record data alongside the configuration, requiring zero extra code.
+
+How it works:
+
+Create the Bundle: Go to Customization > SuiteBundler > Create Bundle.
+
+Add Components: Select your Suitelet, User Event Script, and the Custom Record Type (customrecord_ns_savedsearches_lib). By adding the scripts, NetSuite will automatically pull in the associated script deployments and the .js files from the File Cabinet.
+
+Include the Data: This is the critical step. When you reach the Select Data step in the Bundle Builder, you will see your Custom Record Type listed. Check the box in the Include Data column. This tells the bundle to package all 100 of your existing embedding records.
+
+Set Preferences: You can set the bundle to be "Shared" (allowing you to share it with specific customer Account IDs) or "Public."
+
+Install: In the target account, go to Customization > SuiteBundler > Search & Install Bundles, find your bundle, and install it. The schema, scripts, and all 100 RAG records will be deployed simultaneously.
+
+Option 2: SuiteCloud Development Framework (SDF) (Best for Modern CI/CD)
+SDF is NetSuite’s modern, XML-based deployment framework. It is the best practice for version control and professional development. However, SDF is designed to migrate metadata (schema and code), not transactional or custom record data. To include your 100 records, you need a programmatic workaround.
+
+How it works:
+
+Extract XML Schema: Use the SDF CLI or IDE extension to import the XML definitions of your Custom Record Type, Custom Fields, Scripts, and Script Deployments into an SDF project.
+
+Handle the Data via CSV: Export your 100 custom records from your source account as a CSV file. Place this CSV file into the File Cabinet folder within your SDF project. (Note: Ensure the JSON array strings in your embedding column are strictly wrapped in double quotes in the CSV to prevent parsing errors).
+
+Create a Bundle Installation Script: Write a SuiteScript 2.x Installation Script (customscript_...). In the afterInstall or afterUpdate entry point, write logic that uses the N/file module to read the CSV from the File Cabinet, parse the rows, and use N/record to create the 100 custom records in the target account automatically.
+
+Deploy: Deploy the SDF project to the target account. The XML creates the architecture, and the installation script populates your RAG library.
+
+Option 3: Commercial SuiteApp (If selling as a product)
+If your goal is to commercialize this AI Bot and list it on https://www.google.com/search?q=SuiteApp.com, you will need to go through the Built for NetSuite (BFN) program.
+
+How it works:
+
+You will package the application using either SDF or SuiteBundler (Managed Bundles are usually preferred for commercial apps so you can push updates to customers automatically).
+
+You must adhere to strict BFN development guidelines (e.g., prefixing all script IDs and fields with a unique publisher ID, ensuring API governance).
+
+The 100 records would be deployed via an installation script (as outlined in Option 2) to ensure clean deployment upon app purchase.
+
+Recommendation
+If you are moving this internally (e.g., from Sandbox to Production) or deploying to a handful of known clients quickly: Use Option 1 (SuiteBundler). It will save you the headache of writing data-import scripts for your embeddings.
+
+If you are building a scalable product and want to manage the codebase in GitHub/GitLab: Use Option 2 (SDF).
