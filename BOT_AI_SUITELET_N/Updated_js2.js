@@ -6,7 +6,7 @@
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), Intention Analysis, SuiteScript JSON creation,
  * active search.save() validation, dynamic SuiteQL custom field extraction, contextual date filters,
  * usage quota limits, Out-Of-Domain (OOD) protection, dynamic search naming, and an asynchronous conversational frontend.
- * Includes Graceful Fallback for returning Draft JSON on validation failure.
+ * Includes Graceful Fallback for returning Draft JSON and manual UI instructions on validation failure.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
@@ -39,6 +39,55 @@ function (serverWidget, llm, search, query) {
         let minutes = d.getMinutes().toString().padStart(2, '0');
         
         return `(${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()} , ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}, ${d.getFullYear()})`;
+    };
+
+    const generateUIInstructions = (jsonString) => {
+        try {
+            const config = JSON.parse(jsonString);
+            const recordType = config.type ? String(config.type).toUpperCase() : 'Desired Record Type';
+            
+            let html = `<div style="margin-top: 15px; padding: 15px; background-color: #fff8e1; border-left: 4px solid #ffb300; border-radius: 6px; color: #333;">`;
+            html += `<h4 style="margin-top:0; margin-bottom: 10px; color: #d84315;">🛠️ How to Create This Manually in NetSuite UI</h4>`;
+            html += `<ol style="margin-bottom: 0; padding-left: 20px; font-size: 13px; line-height: 1.6;">`;
+            html += `<li>Go to <strong>Lists > Search > Saved Searches > New</strong>.</li>`;
+            html += `<li>Select the <strong>${recordType}</strong> record type.</li>`;
+            html += `<li>Set the Search Title to <strong>${config.title || 'AI Generated Search'}</strong>.</li>`;
+            
+            if (config.filters && config.filters.length > 0) {
+                html += `<li>Navigate to the <strong>Criteria > Standard</strong> subtab and add these filters:<ul>`;
+                config.filters.forEach(f => {
+                    if (Array.isArray(f) && f.length >= 3) {
+                         html += `<li>Field: <code>${f[0]}</code> | Operator: <code>${f[1]}</code> | Value: <code>${f[2]}</code></li>`;
+                    } else if (f && typeof f === 'object' && f.name) {
+                         let val = f.values ? f.values.join(', ') : (f.formula || '');
+                         html += `<li>Field: <code>${f.name}</code> | Operator: <code>${f.operator || 'is'}</code> | Value: <code>${val}</code></li>`;
+                    }
+                });
+                html += `</ul></li>`;
+            }
+            
+            if (config.columns && config.columns.length > 0) {
+                html += `<li>Navigate to the <strong>Results > Columns</strong> subtab and add these fields:<ul>`;
+                config.columns.forEach(c => {
+                    if (typeof c === 'string') {
+                        html += `<li>Field: <code>${c}</code></li>`;
+                    } else if (c && typeof c === 'object' && c.name) {
+                        let extras = [];
+                        if (c.summary) extras.push(`Summary: <code>${c.summary}</code>`);
+                        if (c.formula) extras.push(`Formula: <code>${c.formula}</code>`);
+                        let extraStr = extras.length > 0 ? ` &mdash; <em>${extras.join(', ')}</em>` : '';
+                        html += `<li>Field: <code>${c.name}</code>${extraStr}</li>`;
+                    }
+                });
+                html += `</ul></li>`;
+            }
+            
+            html += `<li>Click <strong>Save & Run</strong>.</li>`;
+            html += `</ol></div>`;
+            return html;
+        } catch(e) {
+            return '';
+        }
     };
 
     // --- RAG & AI Extraction Functions ---
@@ -261,6 +310,11 @@ function (serverWidget, llm, search, query) {
                                         📋 Copy Draft JSON
                                     </button>
                                 </div>\`;
+                                
+                            // Append the generated UI steps if they exist
+                            if (data.manualStepsHtml) {
+                                errorHtml += data.manualStepsHtml;
+                            }
                         }
                         
                         appendHtmlMessage(errorHtml, 'bot-msg');
@@ -349,7 +403,7 @@ function (serverWidget, llm, search, query) {
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
-            let responsePayload = { success: false, searchCode: '', savedSearchId: '', searchName: '', error: '', draftCode: '' };
+            let responsePayload = { success: false, searchCode: '', savedSearchId: '', searchName: '', error: '', draftCode: '', manualStepsHtml: '' };
 
             if (isQuotaExhausted) {
                 responsePayload.error = "The AI Bot is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month.";
@@ -482,10 +536,11 @@ function (serverWidget, llm, search, query) {
                     responsePayload.savedSearchId = String(createdSavedSearchId); 
                     responsePayload.searchName = createdSearchName;
                     responsePayload.searchCode = finalSearchCode;
-                } else if (!responsePayload.error) {
-                    // Fallback triggered: provide the user with the last drafted code
+                } else if (!responsePayload.error && lastDraftedJson) {
+                    // Fallback triggered: provide the user with the last drafted code AND manual steps
                     responsePayload.error = "I couldn't successfully save this to NetSuite (likely due to a missing or invalid custom field ID). However, I've generated a draft configuration for you below. You can copy this, update the field names, and use it in your code!";
                     responsePayload.draftCode = lastDraftedJson;
+                    responsePayload.manualStepsHtml = generateUIInstructions(lastDraftedJson);
                 }
 
             } catch (err) {
