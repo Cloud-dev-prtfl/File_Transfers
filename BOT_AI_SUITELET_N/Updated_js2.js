@@ -4,8 +4,8 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: Autonomous Saved Search Generator Bot (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), Intention Analysis, SuiteScript JSON creation,
- * active search.save() validation, dynamic SuiteQL custom field extraction, usage quota limits, 
- * Out-Of-Domain (OOD) protection, dynamic search naming, and an asynchronous conversational frontend.
+ * active search.save() validation, dynamic SuiteQL custom field extraction, contextual date filters,
+ * usage quota limits, Out-Of-Domain (OOD) protection, dynamic search naming, and an asynchronous conversational frontend.
  * Includes Graceful Fallback for returning Draft JSON on validation failure.
  */
 
@@ -369,7 +369,7 @@ function (serverWidget, llm, search, query) {
                 let validationAttempts = 0;
                 const maxAttempts = 3;
 
-                // --- NEW STEP 1: Intention Analysis ---
+                // --- STEP 1: Intention Analysis ---
                 let analyzedIntention = '';
                 try {
                     const intentPrompt = `Analyze the following user request for a NetSuite saved search. Explicitly state the core technical intent, identify the likely primary record type, and list the main filtering criteria. Keep it concise. Request: "${userQuery}"`;
@@ -418,8 +418,19 @@ function (serverWidget, llm, search, query) {
                     }
                 } catch (extractionErr) {}
 
+                // --- STEP 4.5: Date Filter Context Injection (Cost-Optimized) ---
+                let dateFilterContext = "";
+                const dateKeywords = /day|month|year|quarter|week|today|tomorrow|yesterday|ago|next|last|prior|before|after/i;
+
+                if (dateKeywords.test(userQuery)) {
+                    // Highly compressed list to save LLM tokens
+                    const minifiedDates = `fivedaysago, fivedaysfromnow, fourdaysago, fourdaysfromnow, ninetydaysago, ninetydaysfromnow, previousoneday, samedayfiscalquarterbeforelast, samedayfiscalyearbeforelast, samedaylastfiscalquarter, samedaylastfiscalyear, samedaylastmonth, samedaylastweek, samedaymonthbeforelast, samedayweekbeforelast, sixtydaysago, sixtydaysfromnow, tendaysago, tendaysfromnow, thirtydaysago, threedaysago, threedaysfromnow, today, todaytoendofthismonth, tomorrow, twodaysago, twodaysfromnow, yesterday, lastmonth, lastmonthonefiscalquarterago, lastmonthonefiscalyearago, lastmonthtodate, lastmonthtwofiscalquartersago, lastmonthtwofiscalyearsago, monthafternext, monthafternexttodate, monthbeforelast, monthbeforelasttodate, nextmonth, nextonemonth, previousmonthslastfiscalhalf, previousmonthslastfiscalquarter, previousmonthslastfiscalyear, previousmonthssamefiscalhalflastfiscalyear, previousmonthssamefiscalquarterlastfiscalyear, previousmonthsthisfiscalhalf, previousmonthsthisfiscalquarter, previousmonthsthisfiscalyear, previousonemonth, samemonthfiscalquarterbeforelast, samemonthfiscalyearbeforelast, samemonthlastfiscalquarter, samemonthlastfiscalquartertodate, samemonthlastfiscalyear, samemonthlastfiscalyeartodate, thismonth, thismonthtodate, threemonthsago, threemonthsagotodate, fiscalhalfbeforelast, fiscalhalfbeforelasttodate, fiscalquarterbeforelast, fiscalquarterbeforelasttodate, lastfiscalhalf, lastfiscalhalfonefiscalyearago, lastfiscalhalftodate, lastfiscalquarter, lastfiscalquarteronefiscalyearago, lastfiscalquartertodate, lastfiscalquartertwofiscalyearsago, lastrollinghalf, lastrollingquarter, nextfiscalhalf, nextfiscalquarter, nextonehalf, nextonequarter, previousfiscalquarterslastfiscalyear, previousfiscalquartersthisfiscalyear, previousonehalf, previousonequarter, previousrollinghalf, previousrollingquarter, samefiscalhalflastfiscalyear, samefiscalhalflastfiscalyeartodate, samefiscalquarterfiscalyearbeforelast, samefiscalquarterlastfiscalyear, samefiscalquarterlastfiscalyeartodate, thisfiscalhalf, thisfiscalhalftodate, thisfiscalquarter, thisfiscalquartertodate, thisrollinghalf, thisrollingquarter, threefiscalquartersago, threefiscalquartersagotodate, fourweeksstartingthisweek, lastbusinessweek, lastweek, lastweektodate, nextbusinessweek, nextfourweeks, nextoneweek, nextweek, previousoneweek, sameweekfiscalyearbeforelast, thisbusinessweek, thisweek, thisweektodate, weekafternext, weekafternexttodate, weekbeforelast, weekbeforelasttodate, fiscalyearbeforelast, fiscalyearbeforelasttodate, lastfiscalyear, lastfiscalyeartodate, nextoneyear, oneyearbeforelast, previousoneyear, previousrollingyear, sameweeklastfiscalyear, thisfiscalyear, thisfiscalyeartodate, thisrollingyear, thisyear, thisyeartodate, threefiscalyearsago, threefiscalyearsagotodate`;
+                    
+                    dateFilterContext = ` IMPORTANT: The user is requesting a date filter. You MUST use one of these exact internal IDs for relative date filters if applicable: [${minifiedDates}]. Do NOT make up your own relative date strings.`;
+                }
+
                 // --- STEP 5: Generation & Active Save Validation ---
-                let currentPrompt = `You are a strict NetSuite SuiteScript 2.x expert bot. Analyze the request: "${userQuery}". If this is conversational or completely unrelated to NetSuite saved searches, reply with exactly: "OOD_REQUEST". Otherwise, generate the JSON configuration required for 'search.create(options)'. The JSON MUST strictly contain 'type' (a string internal id like 'salesorder', 'customer', etc.), 'filters' (a valid array of filter expressions/objects), 'columns' (an array of strings or column objects), and a 'title' (a concise, descriptive name based on the user's request, e.g., 'Top 10 Sellers This Week'). DO NOT include an 'id' in the JSON.${customFieldMappingText} Return ONLY the raw, valid JSON object (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                let currentPrompt = `You are a strict NetSuite SuiteScript 2.x expert bot. Analyze the request: "${userQuery}". If this is conversational or completely unrelated to NetSuite saved searches, reply with exactly: "OOD_REQUEST". Otherwise, generate the JSON configuration required for 'search.create(options)'. The JSON MUST strictly contain 'type' (a string internal id like 'salesorder', 'customer', etc.), 'filters' (a valid array of filter expressions/objects), 'columns' (an array of strings or column objects), and a 'title' (a concise, descriptive name based on the user's request, e.g., 'Top 10 Sellers This Week'). DO NOT include an 'id' in the JSON.${customFieldMappingText}${dateFilterContext} Return ONLY the raw, valid JSON object (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
