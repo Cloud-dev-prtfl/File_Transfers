@@ -79,3 +79,17 @@ What happens: Agent 1 parses the unstructured "scanned" blob. It identifies it l
 
 
 We can achieve this using a RESTlet in SuiteScript 2.x. Cybra needs to have the provision to configure OAuth 2.0 or OAuth 1.0 while pushing the data. If Cybra's webhook engine cannot generate OAuth 1.0 TBA signatures dynamically, you can build a NetSuite Suitelet configured as 'Available Without Login' to act as a webhook receiver. You would secure it by requiring Cybra to pass a custom static API Key in the HTTP headers (e.g., x-api-key: your_secret_string). By using a RESTlet and a Map/Reduce script, we can achieve both use cases.
+
+
+
+
+
+
+Show me the total sales amount grouped by sales rep for the last rolling quarter.
+Find all purchase orders created in the same fiscal quarter last year that are still fully pending receipt.
+List all open sales orders where the customer's primary subsidiary is 'USA' and the item is out of stock. Exclude drop shipments.
+Show me all unpaid invoices that are over 60 days past due. Include the customer name, days open, and the amount remaining.
+Find all support cases created this month where the custom field 'Escalation Reason' is set to 'Bug' and the status is not closed.
+Create a search of items where the custom field 'Super Secret Item Margin' is greater than 50%
+Give me a list of vendors who have had more than 5 purchase orders created this year. Show the vendor name and the count of orders
+Can you write a UserEvent script to automatically email the customer when a sales order is fulfilled?
