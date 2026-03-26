@@ -344,9 +344,29 @@ function (serverWidget, llm, search, query) {
                 let validationAttempts = 0;
                 const maxAttempts = 3;
 
-                // Architectural Step 1: Vectorize the user's natural language query
+                // --- Architectural Step 0.5: Determine User Intention ---
+                let userIntention = "";
+                try {
+                    const intentionPrompt = `Analyze the following NetSuite formula request and describe the primary core intention, logic, or mathematical operation the user wants to achieve in one concise sentence. Do not include introductory text. Request: "${userQuery}"`;
+                    
+                    const intentionResponse = llm.generateText({
+                        prompt: intentionPrompt,
+                        modelFamily: llm.ModelFamily.COHERE_COMMAND,
+                        modelParameters: { temperature: 0.1 }
+                    });
+                    
+                    userIntention = intentionResponse.text.trim();
+                } catch (intentionErr) {
+                    // Fail silently and proceed with standard vectorization if intention extraction fails
+                    userIntention = "";
+                }
+
+                // Append the extracted intention to the original query for richer context
+                const enrichedQuery = userIntention ? `${userQuery} Intention: ${userIntention}` : userQuery;
+
+                // --- Architectural Step 1: Vectorize the enriched natural language query ---
                 const queryEmbeddingResponse = llm.embed({
-                    inputs: [userQuery],
+                    inputs: [enrichedQuery],
                     embedModelFamily: llm.EmbedModelFamily.COHERE_EMBED
                 });
                 const userQueryVector = queryEmbeddingResponse.embeddings[0]; 
