@@ -4,7 +4,8 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator BOT (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic Record schema and Data Type introspection, collapsible usage quota limits, and an asynchronous frontend.
+ * dynamic Record schema and Data Type introspection, Chain of Thought (CoT) self-correction,
+ * Few-Shot Prompting, collapsible usage quota limits, and an asynchronous frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query', 'N/record'], 
@@ -391,13 +392,19 @@ function (serverWidget, llm, search, query, record) {
                 if (targetRecordType !== 'unknown') {
                     const validFieldTypes = getAvailableFieldsForRecord(targetRecordType);
                     if (validFieldTypes && Object.keys(validFieldTypes).length > 0) {
-                        // Pass the dictionary of valid internal IDs and their data types directly into the LLM context rules
                         availableFieldsText = `\nCRITICAL CONTEXT: The target NetSuite record is '${targetRecordType}'. Here is a JSON dictionary mapping valid field internal IDs to their NetSuite Data Types: ${JSON.stringify(validFieldTypes)}. You MUST strictly use matching internal IDs from this dictionary. Pay close attention to the Data Types: do NOT perform mathematical operations between mismatched types (e.g., subtracting a 'text' field from a 'date') without using appropriate Oracle SQL conversion functions like TO_DATE, TO_NUMBER, or TO_CHAR.`;
                     }
                 }
 
-                // --- Architectural Step 3: Generation with Out-Of-Domain Guardrail & Schema enforcement ---
-                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                // --- Architectural Step 3: Generation with Few-Shot, CoT Self-Correction & Guardrails ---
+                const fewShotExamples = `
+GOLDEN EXAMPLES OF CORRECT NETSUITE FORMULAS:
+1. Date Math (Handle Nulls): Request: "Calculate days between date created and closed. If not closed, use today." -> Formula: ROUND(NVL({dateclosed}, SYSDATE) - {datecreated})
+2. Safe Division (Prevent Errors): Request: "Calculate margin (profit / revenue) but handle zero revenue." -> Formula: CASE WHEN NVL({revenue}, 0) = 0 THEN 0 ELSE ({profit} / NULLIF({revenue}, 0)) * 100 END
+3. Type Conversion (Concat): Request: "Combine document number and transaction date." -> Formula: {tranid} || ' - ' || TO_CHAR({trandate}, 'YYYY-MM-DD')
+`;
+
+                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.\n${fewShotExamples}${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
@@ -407,21 +414,32 @@ function (serverWidget, llm, search, query, record) {
                         modelParameters: { temperature: 0.1, maxTokens: 1000 }
                     });
 
-                    const generatedText = llmResponse.text.trim();
+                    let generatedResponse = llmResponse.text.trim();
                     
-                    if (generatedText.includes('OOD_REQUEST')) {
+                    if (generatedResponse.includes('OOD_REQUEST')) {
                         responsePayload.error = "I am a specialized NetSuite AI Formula BOT. I can only answer questions and generate logic related to NetSuite saved searches formulas. Please ask me a formula-related question!";
                         break; 
                     }
+
+                    // CoT Extraction: Extract formula from tags if present (applies to retry loops)
+                    let formulaToValidate = generatedResponse;
+                    const tagMatch = generatedResponse.match(/<formula>([\s\S]*?)<\/formula>/i);
+                    if (tagMatch) {
+                        formulaToValidate = tagMatch[1].trim();
+                    } else {
+                        // Fallback: Strip markdown block formatting if the LLM ignores tags
+                        formulaToValidate = formulaToValidate.replace(/```(sql)?/gi, '').trim();
+                    }
                     
-                    const validation = validateFormulaSyntax(generatedText);
+                    const validation = validateFormulaSyntax(formulaToValidate);
                     
                     if (validation.isValid) {
-                        finalFormula = generatedText;
+                        finalFormula = formulaToValidate;
                         break; 
                     } else {
                         validationAttempts++;
-                        currentPrompt = `You previously generated this formula: ${generatedText}. It resulted in the following NetSuite compilation error: ${validation.error}. Please fix the syntax, resolve the data type or logic error, and return ONLY the corrected raw formula text.`;
+                        // Activate Chain of Thought (CoT) prompting for the correction attempt
+                        currentPrompt = `You previously generated this formula: ${formulaToValidate}\n\nIt resulted in the following NetSuite compilation error: "${validation.error}".\n\nFirst, carefully THINK about this error. Write one concise sentence explaining exactly why Oracle SQL or NetSuite rejected the syntax based on the error message and the Data Types context provided.\nThen, provide the corrected raw formula wrapped exactly in <formula> and </formula> tags. Do not add markdown inside the tags.`;
                     }
                 }
 
@@ -430,7 +448,7 @@ function (serverWidget, llm, search, query, record) {
                     responsePayload.success = true;
                     responsePayload.formula = finalFormula;
                 } else if (!responsePayload.error) {
-                    responsePayload.error = "Unable to generate a syntactically valid formula after 3 iterative attempts. Please refine the input prompt.";
+                    responsePayload.error = "Unable to generate a syntactically valid formula after 3 iterative attempts. Please verify your requested logic and field names.";
                 }
 
             } catch (err) {
