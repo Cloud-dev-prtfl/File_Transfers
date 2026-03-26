@@ -404,7 +404,9 @@ GOLDEN EXAMPLES OF CORRECT NETSUITE FORMULAS:
 3. Type Conversion (Concat): Request: "Combine document number and transaction date." -> Formula: {tranid} || ' - ' || TO_CHAR({trandate}, 'YYYY-MM-DD')
 `;
 
-                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.\n${fewShotExamples}${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                // CRITICAL FIX: Instructed the LLM to use its internal general knowledge of Oracle/NetSuite PLSQL as a primary driver,
+                // and to treat RAG documents purely as helpful reference materials, unblocking logic not present in the DB.
+                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.\n\nCRITICAL INSTRUCTION: Use the provided retrieved documents as a helpful reference, but you MUST rely on your inherent extensive knowledge of NetSuite and Oracle SQL to generate the formula if the exact logic is not found in the documents. Do not be limited by the provided documents.\n\n${fewShotExamples}${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
