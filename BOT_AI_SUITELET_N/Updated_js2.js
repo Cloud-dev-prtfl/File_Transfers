@@ -4,7 +4,7 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator BOT (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic Record schema introspection, collapsible usage quota limits, and an asynchronous frontend.
+ * dynamic Record schema and Data Type introspection, collapsible usage quota limits, and an asynchronous frontend.
  */
 
 define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query', 'N/record'], 
@@ -78,7 +78,6 @@ function (serverWidget, llm, search, query, record) {
             });
             
             let recordType = llmResponse.text.trim().toLowerCase();
-            // Clean up common LLM formatting artifacts
             return recordType.replace(/['"`]/g, '').replace(/```(json)?/g, '').trim();
         } catch (e) {
             return 'unknown'; 
@@ -86,15 +85,29 @@ function (serverWidget, llm, search, query, record) {
     };
 
     const getAvailableFieldsForRecord = (recordType) => {
-        if (!recordType || recordType === 'unknown') return [];
+        if (!recordType || recordType === 'unknown') return null;
         try {
-            // Instantiate a dummy record in memory to introspect its schema
-            // This pulls BOTH standard fields and custom fields assigned to this record type
             const dummyRec = record.create({ type: recordType });
-            return dummyRec.getFields();
+            const fields = dummyRec.getFields();
+            const fieldDataTypes = {};
+
+            // Iterate through fields to extract their specific NetSuite data types
+            fields.forEach(fieldId => {
+                try {
+                    const fieldObj = dummyRec.getField({ fieldId: fieldId });
+                    if (fieldObj && fieldObj.type) {
+                        fieldDataTypes[fieldId] = fieldObj.type;
+                    } else {
+                        fieldDataTypes[fieldId] = 'unknown';
+                    }
+                } catch (err) {
+                    // Skip fields that throw errors during API introspection
+                }
+            });
+
+            return fieldDataTypes;
         } catch (e) {
-            // Fail gracefully if the LLM hallucinated a record type or returned an un-instantiable type
-            return [];
+            return null;
         }
     };
 
@@ -196,7 +209,7 @@ function (serverWidget, llm, search, query, record) {
 
                 // 2. Render Loading State
                 const loadingId = 'loading-' + Date.now();
-                appendMessage('Thinking, scanning record schema, and compiling formula against NetSuite search engine...', 'bot-msg typing-indicator', loadingId);
+                appendMessage('Thinking, scanning record schema & data types, and compiling formula against NetSuite search engine...', 'bot-msg typing-indicator', loadingId);
 
                 try {
                     // 3. Send Async POST Request to this Suitelet
@@ -213,9 +226,8 @@ function (serverWidget, llm, search, query, record) {
                     if (data.success) {
                         const formulaId = 'code-' + Date.now();
                         
-                        // Add a contextual note if the bot identified the record schema successfully
                         const schemaContextNote = data.identifiedRecord !== 'unknown' 
-                            ? \`<div class="system-note">🔍 Introspected schema for '\${data.identifiedRecord}' record to ensure field accuracy.</div>\` 
+                            ? \`<div class="system-note">🔍 Introspected schema & data types for '\${data.identifiedRecord}' record to ensure accuracy.</div>\` 
                             : '';
 
                         const htmlResponse = \`
@@ -371,16 +383,16 @@ function (serverWidget, llm, search, query, record) {
                     });
                 });
 
-                // --- Architectural Step 2.5: Dynamic Record Schema Introspection ---
+                // --- Architectural Step 2.5: Dynamic Record Schema & Type Introspection ---
                 let availableFieldsText = "";
                 const targetRecordType = identifyTargetRecordType(userQuery);
                 responsePayload.identifiedRecord = targetRecordType;
 
                 if (targetRecordType !== 'unknown') {
-                    const validFields = getAvailableFieldsForRecord(targetRecordType);
-                    if (validFields && validFields.length > 0) {
-                        // Pass the array of valid internal IDs directly into the LLM context rules
-                        availableFieldsText = `\nCRITICAL CONTEXT: The target NetSuite record is '${targetRecordType}'. Here is the array of valid standard and custom field internal IDs for this record: ${JSON.stringify(validFields)}. You MUST strictly use matching internal IDs from this array when referencing fields in your formula. Do not guess or invent field names.`;
+                    const validFieldTypes = getAvailableFieldsForRecord(targetRecordType);
+                    if (validFieldTypes && Object.keys(validFieldTypes).length > 0) {
+                        // Pass the dictionary of valid internal IDs and their data types directly into the LLM context rules
+                        availableFieldsText = `\nCRITICAL CONTEXT: The target NetSuite record is '${targetRecordType}'. Here is a JSON dictionary mapping valid field internal IDs to their NetSuite Data Types: ${JSON.stringify(validFieldTypes)}. You MUST strictly use matching internal IDs from this dictionary. Pay close attention to the Data Types: do NOT perform mathematical operations between mismatched types (e.g., subtracting a 'text' field from a 'date') without using appropriate Oracle SQL conversion functions like TO_DATE, TO_NUMBER, or TO_CHAR.`;
                     }
                 }
 
@@ -409,7 +421,7 @@ function (serverWidget, llm, search, query, record) {
                         break; 
                     } else {
                         validationAttempts++;
-                        currentPrompt = `You previously generated this formula: ${generatedText}. It resulted in the following NetSuite compilation error: ${validation.error}. Please fix the syntax, resolve the error, and return ONLY the corrected raw formula text.`;
+                        currentPrompt = `You previously generated this formula: ${generatedText}. It resulted in the following NetSuite compilation error: ${validation.error}. Please fix the syntax, resolve the data type or logic error, and return ONLY the corrected raw formula text.`;
                     }
                 }
 
