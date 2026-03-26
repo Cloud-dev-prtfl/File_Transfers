@@ -4,11 +4,11 @@
  * @NModuleScope SameAccount
  * * Architectural Blueprint: High-Accuracy Formula Generator BOT (Chat UI Edition)
  * Utilizes N/llm, Retrieval-Augmented Generation (RAG), programmatic search validation,
- * dynamic SuiteQL custom field extraction, collapsible usage quota limits/display, and an asynchronous conversational frontend.
+ * dynamic Record schema introspection, collapsible usage quota limits, and an asynchronous frontend.
  */
 
-define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query'], 
-function (serverWidget, llm, search, query) {
+define(['N/ui/serverWidget', 'N/llm', 'N/search', 'N/query', 'N/record'], 
+function (serverWidget, llm, search, query, record) {
 
     // --- Core Backend Functions (Untouched for stability) ---
 
@@ -65,10 +65,10 @@ function (serverWidget, llm, search, query) {
         }
     };
 
-    // --- Agentic Extraction Backend Functions ---
+    // --- Dynamic Record Schema Backend Functions ---
 
-    const extractFieldNames = (userQuery) => {
-        const extractionPrompt = `Extract potential custom field names or labels from the following request. Return ONLY a valid JSON array of strings representing the field names. Do not include markdown, formatting, or explanations. Request: "${userQuery}"`;
+    const identifyTargetRecordType = (userQuery) => {
+        const extractionPrompt = `Analyze the following NetSuite formula request. Identify the specific NetSuite internal record type ID (e.g., 'salesorder', 'customer', 'employee', 'invoice') implied by the query. Do NOT return abstract types like 'transaction', guess the specific concrete type if necessary. Return ONLY the single word internal ID in lowercase, or 'UNKNOWN' if it cannot be determined. Request: "${userQuery}"`;
         
         try {
             const llmResponse = llm.generateText({
@@ -77,36 +77,25 @@ function (serverWidget, llm, search, query) {
                 modelParameters: { temperature: 0.1 }
             });
             
-            let text = llmResponse.text.trim();
-            if (text.startsWith('```')) {
-                text = text.replace(/```(json)?/g, '').trim();
-            }
-            return JSON.parse(text);
+            let recordType = llmResponse.text.trim().toLowerCase();
+            // Clean up common LLM formatting artifacts
+            return recordType.replace(/['"`]/g, '').replace(/```(json)?/g, '').trim();
         } catch (e) {
-            return []; 
+            return 'unknown'; 
         }
     };
 
-    const lookupCustomFieldIds = (fieldNames) => {
-        if (!fieldNames || fieldNames.length === 0) return {};
-        const mapping = {};
-        
+    const getAvailableFieldsForRecord = (recordType) => {
+        if (!recordType || recordType === 'unknown') return [];
         try {
-            const placeholders = fieldNames.map(() => '?').join(', ');
-            const sql = `SELECT scriptid, name FROM customfield WHERE name IN (${placeholders})`;
-            
-            const results = query.runSuiteQL({
-                query: sql,
-                params: fieldNames
-            }).asMappedResults();
-
-            results.forEach(res => {
-                mapping[res.name] = res.scriptid;
-            });
+            // Instantiate a dummy record in memory to introspect its schema
+            // This pulls BOTH standard fields and custom fields assigned to this record type
+            const dummyRec = record.create({ type: recordType });
+            return dummyRec.getFields();
         } catch (e) {
-            // Fail gracefully to avoid crashing the main execution loop
+            // Fail gracefully if the LLM hallucinated a record type or returned an un-instantiable type
+            return [];
         }
-        return mapping;
     };
 
     // --- UI HTML/CSS/JS Payload ---
@@ -117,7 +106,7 @@ function (serverWidget, llm, search, query) {
             : 'Hello! I am ready to generate and validate complex saved search formulas for you. What logic do you need help writing today?';
         
         const disableInputAttr = isQuotaExhausted ? 'disabled' : '';
-        const placeholderText = isQuotaExhausted ? 'Quota exhausted. BOT unavailable.' : 'e.g., Calculate days between date created and closed...';
+        const placeholderText = isQuotaExhausted ? 'Quota exhausted. BOT unavailable.' : 'e.g., Calculate days between date created and closed on a Sales Order...';
 
         return `
         <style>
@@ -148,6 +137,7 @@ function (serverWidget, llm, search, query) {
             #send-btn:hover { background-color: #3b495e; }
             #send-btn:disabled { background-color: #a0abbc; cursor: not-allowed; }
             .typing-indicator { font-style: italic; color: #7f8c8d; font-size: 13px; }
+            .system-note { font-size: 11px; color: #7f8c8d; margin-top: -10px; margin-bottom: 10px; text-align: left; padding-left: 5px; }
         </style>
 
         <div id="bot-workspace">
@@ -206,7 +196,7 @@ function (serverWidget, llm, search, query) {
 
                 // 2. Render Loading State
                 const loadingId = 'loading-' + Date.now();
-                appendMessage('Thinking, generating, and compiling formula against NetSuite search engine...', 'bot-msg typing-indicator', loadingId);
+                appendMessage('Thinking, scanning record schema, and compiling formula against NetSuite search engine...', 'bot-msg typing-indicator', loadingId);
 
                 try {
                     // 3. Send Async POST Request to this Suitelet
@@ -222,7 +212,14 @@ function (serverWidget, llm, search, query) {
                     // 4. Render Bot Response
                     if (data.success) {
                         const formulaId = 'code-' + Date.now();
+                        
+                        // Add a contextual note if the bot identified the record schema successfully
+                        const schemaContextNote = data.identifiedRecord !== 'unknown' 
+                            ? \`<div class="system-note">🔍 Introspected schema for '\${data.identifiedRecord}' record to ensure field accuracy.</div>\` 
+                            : '';
+
                         const htmlResponse = \`
+                            \${schemaContextNote}
                             <strong>Validated Formula Generated:</strong>
                             <pre id="\${formulaId}">\${escapeHtml(data.formula)}</pre>
                             <button type="button" class="copy-btn" onclick="copyToClipboard('\${formulaId}', this)">
@@ -231,7 +228,6 @@ function (serverWidget, llm, search, query) {
                         \`;
                         appendHtmlMessage(htmlResponse, 'bot-msg');
                     } else {
-                        // Dynamically adjust the error prefix based on the error context
                         let errorPrefix = '❌ Validation Failed: ';
                         if (data.error.includes("specialized NetSuite AI Formula BOT")) {
                             errorPrefix = '🤖 Notice: ';
@@ -308,7 +304,6 @@ function (serverWidget, llm, search, query) {
                 isQuotaExhausted = true;
             }
         } catch (e) {
-            // Failsafe: If the quota check errors out, assume availability to prevent false blocking
             isQuotaExhausted = false;
         }
 
@@ -326,8 +321,7 @@ function (serverWidget, llm, search, query) {
             context.response.writePage(form);
             
         } else if (context.request.method === 'POST') {
-            // Act as an API endpoint for the frontend Javascript
-            let responsePayload = { success: false, formula: '', error: '' };
+            let responsePayload = { success: false, formula: '', error: '', identifiedRecord: 'unknown' };
 
             if (isQuotaExhausted) {
                 responsePayload.error = "The AI Formula BOT is currently sleeping! 😴 We have exhausted our free NetSuite AI usage for the month. Please check back on the 1st.";
@@ -354,14 +348,11 @@ function (serverWidget, llm, search, query) {
                         modelFamily: llm.ModelFamily.COHERE_COMMAND,
                         modelParameters: { temperature: 0.1 }
                     });
-                    
                     userIntention = intentionResponse.text.trim();
                 } catch (intentionErr) {
-                    // Fail silently and proceed with standard vectorization if intention extraction fails
                     userIntention = "";
                 }
 
-                // Append the extracted intention to the original query for richer context
                 const enrichedQuery = userIntention ? `${userQuery} Intention: ${userIntention}` : userQuery;
 
                 // --- Architectural Step 1: Vectorize the enriched natural language query ---
@@ -371,7 +362,7 @@ function (serverWidget, llm, search, query) {
                 });
                 const userQueryVector = queryEmbeddingResponse.embeddings[0]; 
 
-                // Architectural Step 2: RAG Retrieval
+                // --- Architectural Step 2: RAG Retrieval ---
                 const contextRecords = retrieveRelevantFormulas(userQueryVector);
                 const ragDocuments = contextRecords.map((rec, index) => {
                     return llm.createDocument({
@@ -380,22 +371,21 @@ function (serverWidget, llm, search, query) {
                     });
                 });
 
-                // Architectural Step 2.5: Agentic Field Extraction
-                let customFieldMappingText = "";
-                try {
-                    const potentialFields = extractFieldNames(userQuery);
-                    if (potentialFields && potentialFields.length > 0) {
-                        const fieldMapping = lookupCustomFieldIds(potentialFields);
-                        if (Object.keys(fieldMapping).length > 0) {
-                            customFieldMappingText = ` IMPORTANT: Use the following accurate NetSuite Script IDs for the requested custom fields: ${JSON.stringify(fieldMapping)}.`;
-                        }
+                // --- Architectural Step 2.5: Dynamic Record Schema Introspection ---
+                let availableFieldsText = "";
+                const targetRecordType = identifyTargetRecordType(userQuery);
+                responsePayload.identifiedRecord = targetRecordType;
+
+                if (targetRecordType !== 'unknown') {
+                    const validFields = getAvailableFieldsForRecord(targetRecordType);
+                    if (validFields && validFields.length > 0) {
+                        // Pass the array of valid internal IDs directly into the LLM context rules
+                        availableFieldsText = `\nCRITICAL CONTEXT: The target NetSuite record is '${targetRecordType}'. Here is the array of valid standard and custom field internal IDs for this record: ${JSON.stringify(validFields)}. You MUST strictly use matching internal IDs from this array when referencing fields in your formula. Do not guess or invent field names.`;
                     }
-                } catch (extractionErr) {
-                    // Fail silently here so the main generator loop still runs
                 }
 
-                // Architectural Step 3: Generation with Out-Of-Domain (OOD) Guardrail
-                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.${customFieldMappingText} Return ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                // --- Architectural Step 3: Generation with Out-Of-Domain Guardrail & Schema enforcement ---
+                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is a general question, conversational filler, or completely unrelated to NetSuite, saved searches, database logic, or formula generation, reply with the exact text: "OOD_REQUEST". Otherwise, write a NetSuite saved search formula for the request.${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
@@ -407,7 +397,6 @@ function (serverWidget, llm, search, query) {
 
                     const generatedText = llmResponse.text.trim();
                     
-                    // Intercept off-topic questions instantly
                     if (generatedText.includes('OOD_REQUEST')) {
                         responsePayload.error = "I am a specialized NetSuite AI Formula BOT. I can only answer questions and generate logic related to NetSuite saved searches formulas. Please ask me a formula-related question!";
                         break; 
