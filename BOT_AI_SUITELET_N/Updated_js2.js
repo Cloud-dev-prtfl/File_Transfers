@@ -369,12 +369,11 @@ function (serverWidget, llm, search, query, record) {
                 // --- Architectural Step 0.75: Intent Router Classification ---
                 let requestCategory = "STANDARD_LOGIC";
                 try {
-                    // CRITICAL FIX: Upgraded HTML_LINK to HTML_UI to cover all div/span tag generation.
                     const routingPrompt = `Categorize the following NetSuite formula request into exactly ONE of these four categories:
-1. HTML_UI (User wants to generate HTML elements, progress bars, colored text, UI formatting, or clickable links)
-2. REGEX_MANIPULATION (User wants to strip, extract, or clean text/phone numbers/strings/emails)
+1. HTML_LINK (User wants to generate clickable URLs, <a> tags, or HTML elements)
+2. REGEX_MANIPULATION (User wants to strip, extract, or clean text/phone numbers/strings)
 3. SUMMARY_AGGREGATION (User wants a weighted average, sum, grand total, or grouped calculation)
-4. STANDARD_LOGIC (Basic math, advanced date math like fiscal years/months between, CASE statements, or anything else)
+4. STANDARD_LOGIC (Basic math, date differences, CASE statements, or anything else)
 
 Return ONLY the exact category name. Request: "${userQuery}"`;
                     
@@ -385,7 +384,7 @@ Return ONLY the exact category name. Request: "${userQuery}"`;
                     });
                     
                     let rawCategory = routingResponse.text.trim().toUpperCase();
-                    if (rawCategory.includes('HTML_UI') || rawCategory.includes('HTML_LINK')) requestCategory = 'HTML_UI';
+                    if (rawCategory.includes('HTML_LINK')) requestCategory = 'HTML_LINK';
                     else if (rawCategory.includes('REGEX_MANIPULATION')) requestCategory = 'REGEX_MANIPULATION';
                     else if (rawCategory.includes('SUMMARY_AGGREGATION')) requestCategory = 'SUMMARY_AGGREGATION';
                 } catch (routeErr) {
@@ -427,23 +426,21 @@ Return ONLY the exact category name. Request: "${userQuery}"`;
                 let domainSpecificExamples = "";
 
                 switch(requestCategory) {
-                    case 'HTML_UI':
-                        // CRITICAL FIX: explicitly allow divs, styling, and complex UI layouts.
-                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user wants to generate HTML inside the formula. You MUST use string concatenation (||) with valid HTML tags (like <div>, <a>, <span>) and inline CSS (style='...'). Generating HTML UI elements like progress bars or colored text inside formulas IS a valid NetSuite request, do NOT flag as OOD_REQUEST.";
-                        domainSpecificExamples = `1. HTML & Dynamic Links: Request: "Clickable tracking link based on carrier." -> Formula: CASE WHEN {shippingmethod} = 'UPS' THEN '<a href="https://www.ups.com/track?tracknum=' || {trackingnumbers} || '" target="_blank">Track UPS</a>' ELSE 'No Tracking' END\n2. Visual Progress Bar: Request: "Create a progress bar based on percent complete." -> Formula: '<div style="width: 100px; border: 1px solid #ccc; height: 10px;"><div style="width: ' || {percentcomplete} || 'px; background-color: ' || CASE WHEN {percentcomplete} < 50 THEN ''red'' ELSE ''green'' END || '; height: 10px;"></div></div>'`;
+                    case 'HTML_LINK':
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user wants to generate HTML inside the formula. You MUST use string concatenation (||) with valid HTML <a> tags. Generating HTML tags inside formulas IS a valid NetSuite request, do NOT flag as OOD_REQUEST.";
+                        domainSpecificExamples = `1. HTML & Dynamic Links: Request: "Clickable tracking link based on carrier." -> Formula: CASE WHEN {shippingmethod} = 'UPS' THEN '<a href="https://www.ups.com/track?tracknum=' || {trackingnumbers} || '" target="_blank">Track UPS</a>' ELSE 'No Tracking' END`;
                         break;
                     case 'REGEX_MANIPULATION':
-                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user wants to clean, strip, parse or extract text (like domains from emails or digits from phones). You MUST use modern Oracle SQL functions like REGEXP_SUBSTR, REGEXP_REPLACE, or INSTR/SUBSTR combinations.";
-                        domainSpecificExamples = `1. Regex Manipulation: Request: "Extract only numbers from phone." -> Formula: REGEXP_REPLACE({phone}, '[^0-9]', '')\n2. Extract Domain: Request: "Get everything after @ in email." -> Formula: REGEXP_SUBSTR({email}, '@(.*)$', 1, 1, NULL, 1)`;
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user wants to clean, strip, or extract text. You MUST use modern Oracle SQL functions like REGEXP_REPLACE or REGEXP_SUBSTR instead of nested REPLACEs.";
+                        domainSpecificExamples = `1. Regex Manipulation: Request: "Extract only numbers from phone." -> Formula: REGEXP_REPLACE({phone}, '[^0-9]', '')`;
                         break;
                     case 'SUMMARY_AGGREGATION':
                         domainSpecificInstructions = "CRITICAL INSTRUCTION: The user asks for a summary, total, or weighted average. You MUST use aggregate functions like SUM() or MAX() wrapping the field IDs.";
                         domainSpecificExamples = `1. Summary Aggregation: Request: "Weighted average cost." -> Formula: SUM({quantityonhand} * {cost}) / NULLIF(SUM({quantityonhand}), 0)`;
                         break;
                     default:
-                        // CRITICAL FIX: Adding advanced Date/Fiscal math instructions directly into the baseline logic fallback.
-                        domainSpecificInstructions = "CRITICAL INSTRUCTION: Read the user's request carefully and identify any specific CONSTRAINTS. Use advanced Oracle PL/SQL functions like MONTHS_BETWEEN, ADD_MONTHS, TRUNC, or MOD for complex date/fiscal math.";
-                        domainSpecificExamples = `1. Date Math: Request: "Calculate days between date created and closed. If not closed, use today." -> Formula: ROUND(NVL({dateclosed}, SYSDATE) - {datecreated})\n2. Safe Division: Request: "Calculate margin but handle zero revenue." -> Formula: CASE WHEN NVL({revenue}, 0) = 0 THEN 0 ELSE ({profit} / NULLIF({revenue}, 0)) * 100 END\n3. Complex Date Math: Request: "Days between dates excluding Saturdays and Sundays." -> Formula: ({enddate}-{startdate}) - (DENSE_RANK() OVER (ORDER BY {startdate}) - DENSE_RANK() OVER (ORDER BY {enddate}))\n4. Advanced Date Formatting: Request: "Years and months since created." -> Formula: TRUNC(MONTHS_BETWEEN(SYSDATE, {datecreated}) / 12) || ' Years, ' || TRUNC(MOD(MONTHS_BETWEEN(SYSDATE, {datecreated}), 12)) || ' Months'\n5. Fiscal Year Math: Request: "Fiscal year if year starts in July." -> Formula: TO_CHAR(ADD_MONTHS({trandate}, 6), 'YYYY')`;
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: Read the user's request carefully and identify any specific CONSTRAINTS (e.g., 'exclude weekends', 'handle zero values'). If the user asks to exclude weekends, you must use complex Oracle SQL logic (like DENSE_RANK).";
+                        domainSpecificExamples = `1. Date Math: Request: "Calculate days between date created and closed. If not closed, use today." -> Formula: ROUND(NVL({dateclosed}, SYSDATE) - {datecreated})\n2. Safe Division: Request: "Calculate margin but handle zero revenue." -> Formula: CASE WHEN NVL({revenue}, 0) = 0 THEN 0 ELSE ({profit} / NULLIF({revenue}, 0)) * 100 END\n3. Complex Date Math: Request: "Days between dates excluding Saturdays and Sundays." -> Formula: ({enddate}-{startdate}) - (DENSE_RANK() OVER (ORDER BY {startdate}) - DENSE_RANK() OVER (ORDER BY {enddate}))`;
                         break;
                 }
 
