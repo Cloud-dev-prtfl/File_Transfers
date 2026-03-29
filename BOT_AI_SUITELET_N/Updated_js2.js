@@ -366,6 +366,31 @@ function (serverWidget, llm, search, query, record) {
                     userIntention = "";
                 }
 
+                // --- Architectural Step 0.75: Intent Router Classification ---
+                let requestCategory = "STANDARD_LOGIC";
+                try {
+                    const routingPrompt = `Categorize the following NetSuite formula request into exactly ONE of these four categories:
+1. HTML_LINK (User wants to generate clickable URLs, <a> tags, or HTML elements)
+2. REGEX_MANIPULATION (User wants to strip, extract, or clean text/phone numbers/strings)
+3. SUMMARY_AGGREGATION (User wants a weighted average, sum, grand total, or grouped calculation)
+4. STANDARD_LOGIC (Basic math, date differences, CASE statements, or anything else)
+
+Return ONLY the exact category name. Request: "${userQuery}"`;
+                    
+                    const routingResponse = llm.generateText({
+                        prompt: routingPrompt,
+                        modelFamily: llm.ModelFamily.COHERE_COMMAND,
+                        modelParameters: { temperature: 0.1, maxTokens: 20 }
+                    });
+                    
+                    let rawCategory = routingResponse.text.trim().toUpperCase();
+                    if (rawCategory.includes('HTML_LINK')) requestCategory = 'HTML_LINK';
+                    else if (rawCategory.includes('REGEX_MANIPULATION')) requestCategory = 'REGEX_MANIPULATION';
+                    else if (rawCategory.includes('SUMMARY_AGGREGATION')) requestCategory = 'SUMMARY_AGGREGATION';
+                } catch (routeErr) {
+                    requestCategory = "STANDARD_LOGIC";
+                }
+
                 const enrichedQuery = userIntention ? `${userQuery} Intention: ${userIntention}` : userQuery;
 
                 // --- Architectural Step 1: Vectorize the enriched natural language query ---
@@ -396,19 +421,32 @@ function (serverWidget, llm, search, query, record) {
                     }
                 }
 
-                // --- Architectural Step 3: Generation with Few-Shot, CoT Self-Correction & Guardrails ---
-                const fewShotExamples = `
-GOLDEN EXAMPLES OF CORRECT NETSUITE FORMULAS:
-1. Date Math (Handle Nulls): Request: "Calculate days between date created and closed. If not closed, use today." -> Formula: ROUND(NVL({dateclosed}, SYSDATE) - {datecreated})
-2. Safe Division (Prevent Errors): Request: "Calculate margin (profit / revenue) but handle zero revenue." -> Formula: CASE WHEN NVL({revenue}, 0) = 0 THEN 0 ELSE ({profit} / NULLIF({revenue}, 0)) * 100 END
-3. Type Conversion (Concat): Request: "Combine document number and transaction date." -> Formula: {tranid} || ' - ' || TO_CHAR({trandate}, 'YYYY-MM-DD')
-4. Complex Date Math (Exclude Weekends/Working Days): Request: "Calculate days between two dates excluding Saturdays and Sundays." -> Formula: ({enddate}-{startdate}) - (DENSE_RANK() OVER (ORDER BY {startdate}) - DENSE_RANK() OVER (ORDER BY {enddate}))
-5. HTML & Dynamic Links: Request: "Clickable tracking link based on carrier." -> Formula: CASE WHEN {shippingmethod} = 'UPS' THEN '<a href="[https://www.ups.com/track?tracknum=](https://www.ups.com/track?tracknum=)' || {trackingnumbers} || '" target="_blank">Track UPS</a>' ELSE 'No Tracking' END
-6. Regex Manipulation: Request: "Extract only numbers from phone." -> Formula: REGEXP_REPLACE({phone}, '[^0-9]', '')
-7. Summary Aggregation: Request: "Weighted average cost." -> Formula: SUM({quantityonhand} * {cost}) / NULLIF(SUM({quantityonhand}), 0)
-`;
+                // --- Architectural Step 3: Generation with Dynamic Domain Routing, Few-Shot, CoT Self-Correction & Guardrails ---
+                let domainSpecificInstructions = "";
+                let domainSpecificExamples = "";
 
-                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is completely unrelated to NetSuite, databases, or logic, reply with the exact text: "OOD_REQUEST". IMPORTANT: Generating HTML tags inside formulas, Regex manipulation, and summary aggregations ARE valid NetSuite requests, do NOT flag them as OOD_REQUEST.\n\nCRITICAL INSTRUCTIONS:\n1. Read the user's request carefully and identify any specific CONSTRAINTS (e.g., "exclude weekends", "handle zero values", "only specific statuses").\n2. If the user wants to clean, strip, or extract text, you MUST use modern Oracle SQL functions like REGEXP_REPLACE or REGEXP_SUBSTR instead of nested REPLACEs.\n3. If the user asks for a summary, total, or weighted average, you MUST use aggregate functions like SUM() or MAX() wrapping the field IDs.\n4. If the user asks for clickable links, use string concatenation (||) with valid HTML <a> tags.\n\nUse the provided retrieved documents as a helpful reference, but you MUST rely on your inherent extensive knowledge of NetSuite and Oracle SQL to generate the formula if the exact logic is not found in the documents. Do not be limited by the provided documents.\n\n${fewShotExamples}${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
+                switch(requestCategory) {
+                    case 'HTML_LINK':
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user wants to generate HTML inside the formula. You MUST use string concatenation (||) with valid HTML <a> tags. Generating HTML tags inside formulas IS a valid NetSuite request, do NOT flag as OOD_REQUEST.";
+                        domainSpecificExamples = `1. HTML & Dynamic Links: Request: "Clickable tracking link based on carrier." -> Formula: CASE WHEN {shippingmethod} = 'UPS' THEN '<a href="https://www.ups.com/track?tracknum=' || {trackingnumbers} || '" target="_blank">Track UPS</a>' ELSE 'No Tracking' END`;
+                        break;
+                    case 'REGEX_MANIPULATION':
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user wants to clean, strip, or extract text. You MUST use modern Oracle SQL functions like REGEXP_REPLACE or REGEXP_SUBSTR instead of nested REPLACEs.";
+                        domainSpecificExamples = `1. Regex Manipulation: Request: "Extract only numbers from phone." -> Formula: REGEXP_REPLACE({phone}, '[^0-9]', '')`;
+                        break;
+                    case 'SUMMARY_AGGREGATION':
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: The user asks for a summary, total, or weighted average. You MUST use aggregate functions like SUM() or MAX() wrapping the field IDs.";
+                        domainSpecificExamples = `1. Summary Aggregation: Request: "Weighted average cost." -> Formula: SUM({quantityonhand} * {cost}) / NULLIF(SUM({quantityonhand}), 0)`;
+                        break;
+                    default:
+                        domainSpecificInstructions = "CRITICAL INSTRUCTION: Read the user's request carefully and identify any specific CONSTRAINTS (e.g., 'exclude weekends', 'handle zero values'). If the user asks to exclude weekends, you must use complex Oracle SQL logic (like DENSE_RANK).";
+                        domainSpecificExamples = `1. Date Math: Request: "Calculate days between date created and closed. If not closed, use today." -> Formula: ROUND(NVL({dateclosed}, SYSDATE) - {datecreated})\n2. Safe Division: Request: "Calculate margin but handle zero revenue." -> Formula: CASE WHEN NVL({revenue}, 0) = 0 THEN 0 ELSE ({profit} / NULLIF({revenue}, 0)) * 100 END\n3. Complex Date Math: Request: "Days between dates excluding Saturdays and Sundays." -> Formula: ({enddate}-{startdate}) - (DENSE_RANK() OVER (ORDER BY {startdate}) - DENSE_RANK() OVER (ORDER BY {enddate}))`;
+                        break;
+                }
+
+                const fewShotExamples = `GOLDEN EXAMPLES OF CORRECT NETSUITE FORMULAS:\n${domainSpecificExamples}\n`;
+
+                let currentPrompt = `You are a strict NetSuite PL/SQL expert BOT. Analyze the request: "${userQuery}". If this request is completely unrelated to NetSuite, databases, or logic, reply with the exact text: "OOD_REQUEST".\n\n${domainSpecificInstructions}\n\nUse the provided retrieved documents as a helpful reference, but you MUST rely on your inherent extensive knowledge of NetSuite and Oracle SQL to generate the formula if the exact logic is not found in the documents. Do not be limited by the provided documents.\n\n${fewShotExamples}${availableFieldsText}\nReturn ONLY the raw formula text (or "OOD_REQUEST"). No markdown, no conversational text.`;
 
                 while (validationAttempts < maxAttempts) {
                     const llmResponse = llm.generateText({
