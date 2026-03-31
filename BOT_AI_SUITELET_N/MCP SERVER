@@ -1,0 +1,43 @@
+What is the Model Context Protocol (MCP)?
+At its core, MCP is an open-source standard that allows AI models to securely connect to external data sources and tools. Introduced by Anthropic in late 2024, it acts as a universal bridge. Large Language Models (LLMs) like Gemini, Claude, or Codex are brilliant, but they are isolated. They only know what they were trained on and cannot natively look at your private databases or click buttons in your software. MCP provides a standardized "language" so these AI models can fetch real-time information and take actions in the outside world.
+
+The Layman Example: The USB-C of AI
+Think of MCP as the USB-C port for Artificial Intelligence.
+
+Before USB-C became the standard, every device had a different charger—Micro-USB, Mini-USB, Lightning, proprietary laptop chargers, etc. If you bought a new gadget, you had to buy a specific cable for it.
+
+Before MCP, AI faced the exact same problem (known as the "N x M integration problem"). If you were writing a Python script to build an autonomous AI agent, you had to write a completely different custom integration for every single tool the AI needed to talk to—one for your database, one for Slack, one for your local files.
+
+With MCP, you just build one standard connection. If an application has an "MCP Server," any MCP-compatible AI can plug straight into it and understand how to use it immediately.
+
+What is an MCP Server Exactly?
+To understand the server, you have to look at the two main pieces of the puzzle:
+
+The MCP Client (The Brain): This lives inside the AI application you are using (like an AI-powered IDE or a chat interface). It figures out what the AI needs to do and asks for it.
+
+The MCP Server (The Hands & Eyes): This is a lightweight, external program that sits on top of your data or software. It translates the AI's requests into actions the software can understand.
+
+A Real-World Example:
+Imagine you are developing a custom chatbot or autonomous agent for NetSuite or the Zoho ecosystem.
+
+Without MCP, your Python code would have to manually handle every API call, authenticate every request, and translate NetSuite's complex data structures into text the LLM could read.
+
+With MCP, you simply spin up a "NetSuite MCP Server." When a user asks the chatbot, "What is the status of invoice #1234?"
+
+The AI talks to the MCP Server.
+
+The MCP Server securely reaches into NetSuite, grabs the invoice data, and hands it back to the AI in a perfectly formatted, standardized way.
+
+The AI reads it and answers the user.
+
+The 3 Core Superpowers of an MCP Server
+When you connect an AI to an MCP server, the server can hand the AI three specific things:
+
+Resources (Data): This is "read-only" information. The MCP server lets the AI read local files, pull data from a database, or look at live API responses so it has the right context before answering a question.
+
+Tools (Actions): These are executable functions. The MCP server gives the AI the ability to actually do things—like running a Python script, updating a CRM record, or sending an email (usually with a prompt asking for your human approval first).
+
+Prompts (Templates): Pre-written instructions that help the AI know exactly how to handle specific tasks within that specific server's domain.
+
+Why is this a big deal?
+MCP is what transforms an LLM from a static, chatty encyclopedia into a dynamic, autonomous agent. By standardizing how AI talks to our tools, it drastically reduces AI hallucinations (because the AI can simply look up the real facts) and makes building powerful, automated workflows much faster and easier.
