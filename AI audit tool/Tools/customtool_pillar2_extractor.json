@@ -1,0 +1,46 @@
+{
+	"tools": [
+		{
+			"name": "getUsageConsumption",
+			"description": "Extracts SuiteScript execution logs to identify scripts that are consuming dangerously high governance usage units and risking limits.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze Usage Consumption",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "getExecutionTimes",
+			"description": "Calculates execution times (Total Time) across scripts to identify latency and poor system performance.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze Execution Times",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "getConcurrencyBottlenecks",
+			"description": "Identifies concurrency thresholds by looking at overlapping execution windows for Scheduled and RESTlet scripts.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze Concurrency Bottlenecks",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		}
+	]
+}
