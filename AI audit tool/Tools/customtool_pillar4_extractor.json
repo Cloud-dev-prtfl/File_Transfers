@@ -1,0 +1,46 @@
+{
+	"tools": [
+		{
+			"name": "getDataSparsityCandidates",
+			"description": "Extracts custom entity and record fields specifically to allow the AI to perform data sparsity checks (looking for fields with extremely high null rates indicating abandonment).",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Identify Data Sparsity Candidates",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "getWorkflowRedundancy",
+			"description": "Evaluates workflow history to identify workflows that trigger but yield no business value by tracking high abort or rejection rates.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze Workflow Redundancy",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "getLogicCollisions",
+			"description": "Maps the deployment records of active SuiteScripts and SuiteFlows to find logic collisions where a User Event Script and a Workflow overlap on the exact same record type.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Detect Script-Workflow Collisions",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		}
+	]
+}
