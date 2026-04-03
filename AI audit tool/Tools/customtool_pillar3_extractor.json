@@ -1,0 +1,46 @@
+{
+	"tools": [
+		{
+			"name": "getFormComplexity",
+			"description": "Extracts standard and custom forms deployed across the instance to evaluate structural UI complexity.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze Form Complexity",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "getDormantFields",
+			"description": "Identifies UI Bloat by correlating custom fields against the SystemNote table to find fields with zero modifications in the last 12 months.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze Dormant Fields (UI Bloat)",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "getUiLatency",
+			"description": "Extracts UI page load times (Client, Server, and Network latency) by retrieving APM Page Time Details.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Analyze UI Latency (APM)",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		}
+	]
+}
