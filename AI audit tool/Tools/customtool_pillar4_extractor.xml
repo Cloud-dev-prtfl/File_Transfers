@@ -1,0 +1,20 @@
+<tool scriptid="customtool_pillar4_extractor">
+  <name>Pillar 4 Over-Customization Tools</name>
+  <scriptfile>[/SuiteScripts/customtool_pillar4_extractor.js]</scriptfile>
+  <rpcschema>[/SuiteScripts/pillar4_schema_acp.json]</rpcschema>
+  <exposeto3rdpartyagents>T</exposeto3rdpartyagents>
+  <permissions>
+    <permission>
+      <permkey>ADMI_CUSTFIELD</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+    <permission>
+      <permkey>LIST_SCRIPT</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+    <permission>
+      <permkey>ADMI_WORKFLOW</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+  </permissions>
+</tool>
