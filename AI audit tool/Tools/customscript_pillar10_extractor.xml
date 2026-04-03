@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar10_extractor">
-    <name>MCP Pillar 10 Proactive Alerts Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar10_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 10: Check the execution log realtime </description>
-    <isinactive>F</isinactive>
-</customscript>

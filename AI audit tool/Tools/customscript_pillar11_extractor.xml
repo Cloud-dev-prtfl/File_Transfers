@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar11_extractor">
-    <name>MCP Pillar 11 Reporting &amp; Dashboards</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar11_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 11: Generates role-based dashboard payloads for CFOs and Administrators, and prepares flattened datasets for external audit exports.</description>
-    <isinactive>F</isinactive>
-</customscript>

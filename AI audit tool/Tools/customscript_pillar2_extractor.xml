@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar2_extractor">
-    <name>MCP Pillar 2 Performance Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar2_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 2: Analyzes scriptexecutionlogs for governance consumption, execution times, and concurrency issues.</description>
-    <isinactive>F</isinactive>
-</customscript>

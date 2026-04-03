@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar9_extractor">
-    <name>MCP Pillar 9 Security &amp; SOX Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar9_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 9: Acts as a privileged backend process to extract the Role-Permission matrix, audit MFA adherence, and hunt for integration token spoofing.</description>
-    <isinactive>F</isinactive>
-</customscript>

@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar1_extractor">
-    <name>MCP Pillar 1 Extractor Tool</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar1_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 1: Data Collection &amp; Architecture Mapping. Extracts custom fields and bundle data.</description>
-    <isinactive>F</isinactive>
-</customscript>

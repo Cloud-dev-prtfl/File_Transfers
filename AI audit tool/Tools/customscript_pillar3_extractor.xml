@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar3_extractor">
-    <name>MCP Pillar 3 UI &amp; Forms Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar3_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 3: Assesses UI latency, form complexity, and calculates field usage frequency against the SystemNote table.</description>
-    <isinactive>F</isinactive>
-</customscript>

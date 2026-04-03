@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar13_extractor">
-    <name>MCP Pillar 13 Deployment Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar13_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 13: Provides the AI with deployment context, including environment type (Sandbox/Prod) and OneWorld subsidiary topology.</description>
-    <isinactive>F</isinactive>
-</customscript>

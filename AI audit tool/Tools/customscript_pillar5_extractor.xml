@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar5_extractor">
-    <name>MCP Pillar 5 Integration Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar5_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 5: Audits SuiteTalk and RESTlet integration performance, tracking concurrency limits and endpoint latency.</description>
-    <isinactive>F</isinactive>
-</customscript>

@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar12_extractor">
-    <name>MCP Pillar 12 Extensibility Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar12_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 12: Maps external API integrations (TBA/OAuth 2.0) and evaluates script deployment maturity (SDF vs. UI).</description>
-    <isinactive>F</isinactive>
-</customscript>

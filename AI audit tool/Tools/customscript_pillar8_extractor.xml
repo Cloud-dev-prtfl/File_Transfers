@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar8_extractor">
-    <name>MCP Pillar 8 Predict &amp; Context Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar8_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 8: Feeds the AI engine with account-specific operational scale and historical database growth trends for predictive risk analysis.</description>
-    <isinactive>F</isinactive>
-</customscript>

@@ -1,9 +1,0 @@
-<customscript scriptid="customscript_pillar6_extractor">
-    <name>MCP Pillar 6 Bundle Extractor</name>
-    <notifyowner>T</notifyowner>
-    <notifyuser>F</notifyuser>
-    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar6_extractor.js]</scriptfile>
-    <status>RELEASED</status>
-    <description>MCP Custom Tool for Pillar 6: Evaluates the performance drag of installed bundles and detects script collisions across third-party applications.</description>
-    <isinactive>F</isinactive>
-</customscript>
