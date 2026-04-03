@@ -1,0 +1,16 @@
+<tool scriptid="customtool_pillar2_extractor">
+  <name>Pillar 2 Performance Tools</name>
+  <scriptfile>[/SuiteScripts/customtool_pillar2_extractor.js]</scriptfile>
+  <rpcschema>[/SuiteScripts/pillar2_schema_acp.json]</rpcschema>
+  <exposeto3rdpartyagents>T</exposeto3rdpartyagents>
+  <permissions>
+    <permission>
+      <permkey>LIST_SCRIPT</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+    <permission>
+      <permkey>ADMI_MANAGE_PERF</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+  </permissions>
+</tool>
