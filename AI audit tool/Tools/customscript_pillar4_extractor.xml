@@ -1,0 +1,9 @@
+<customscript scriptid="customscript_pillar4_extractor">
+    <name>MCP Pillar 4 Over-Customization Extractor</name>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar4_extractor.js]</scriptfile>
+    <status>RELEASED</status>
+    <description>MCP Custom Tool for Pillar 4: Performs collision analysis between SuiteScripts and SuiteFlows, and detects dormant fields and redundant workflows.</description>
+    <isinactive>F</isinactive>
+</customscript>

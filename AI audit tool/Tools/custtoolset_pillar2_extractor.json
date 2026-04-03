@@ -1,0 +1,19 @@
+{
+  "name": "custtoolset_pillar2_extractor",
+  "description": "Extracts SuiteScript performance data from the script execution logs to identify governance limit risks, latency, and concurrency bottlenecks.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "analysisType": {
+        "type": "string",
+        "description": "The specific performance metric to analyze. Use 'usage_consumption' for governance limits, 'execution_time' for slow scripts, or 'concurrency' for scheduling and RESTlet thread collisions.",
+        "enum": ["usage_consumption", "execution_time", "concurrency"]
+      }
+    },
+    "required": ["analysisType"]
+  },
+  "returns": {
+    "type": "object",
+    "description": "A structured JSON payload containing aggregated SuiteScript execution metrics."
+  }
+}

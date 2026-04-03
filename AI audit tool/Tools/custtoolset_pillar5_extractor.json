@@ -1,0 +1,19 @@
+{
+  "name": "custtoolset_pillar5_extractor",
+  "description": "Extracts NetSuite integration metrics, evaluating API latency, concurrent thread pool limits, and payload rejection rates (e.g., HTTP 429 errors).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "analysisType": {
+        "type": "string",
+        "description": "The integration metric to analyze. Use 'api_throughput' for rate limits/429 errors, 'endpoint_latency' for slow RESTlets (>3s), or 'concurrency_thresholds' for parallel request thread monitoring.",
+        "enum": ["api_throughput", "endpoint_latency", "concurrency_thresholds"]
+      }
+    },
+    "required": ["analysisType"]
+  },
+  "returns": {
+    "type": "object",
+    "description": "A JSON payload detailing middleware integration bottlenecks, endpoint processing times, and concurrency limit breaches."
+  }
+}

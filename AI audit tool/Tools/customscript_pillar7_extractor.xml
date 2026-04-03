@@ -1,0 +1,9 @@
+<customscript scriptid="customscript_pillar7_extractor">
+    <name>MCP Pillar 7 Health Score Extractor</name>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <scriptfile>[/SuiteScripts/AI_Connector/custtoolset_pillar7_extractor.js]</scriptfile>
+    <status>RELEASED</status>
+    <description>MCP Custom Tool for Pillar 7: Pulls aggregated baseline metrics for calculating the System Health Score and industry benchmarking.</description>
+    <isinactive>F</isinactive>
+</customscript>

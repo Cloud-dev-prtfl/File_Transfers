@@ -1,0 +1,19 @@
+{
+  "name": "custtoolset_pillar13_extractor",
+  "description": "Extracts the deployment context of the auditing tool, evaluating the environment type (Sandbox/Production) and mapping the multi-account (OneWorld) Hub-and-Spoke topology.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "analysisType": {
+        "type": "string",
+        "description": "The deployment topology metric to extract. Use 'environment_context' to retrieve Account ID and Sandbox/Production status, or 'multi_account_topology' to map the global subsidiary hierarchy.",
+        "enum": ["environment_context", "multi_account_topology"]
+      }
+    },
+    "required": ["analysisType"]
+  },
+  "returns": {
+    "type": "object",
+    "description": "A JSON payload containing the runtime environment variables and the organizational subsidiary map."
+  }
+}
