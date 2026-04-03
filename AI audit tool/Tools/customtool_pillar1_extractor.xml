@@ -1,0 +1,16 @@
+<tool scriptid="customtool_pillar1_extractor">
+  <name>Pillar 1 Data Collection Tools</name>
+  <scriptfile>[/SuiteScripts/customtool_pillar1_extractor.js]</scriptfile>
+  <rpcschema>[/SuiteScripts/pillar1_schema_acp.json]</rpcschema>
+  <exposeto3rdpartyagents>T</exposeto3rdpartyagents>
+  <permissions>
+    <permission>
+      <permkey>ADMI_CUSTFIELD</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+    <permission>
+      <permkey>ADMI_BUNDLES</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+  </permissions>
+</tool>

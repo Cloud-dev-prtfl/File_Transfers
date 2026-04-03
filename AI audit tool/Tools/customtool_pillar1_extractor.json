@@ -1,0 +1,32 @@
+{
+	"tools": [
+		{
+			"name": "extractCustomFields",
+			"description": "Extracts standard and custom object schema by querying custom field metadata. Use this to map the architecture of the NetSuite instance.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Extract Custom Fields",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		},
+		{
+			"name": "extractInstalledBundles",
+			"description": "Inventories third-party dependencies by extracting installed bundle metadata. Use this to identify third-party managed bundles and SuiteApps.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			},
+			"annotations": {
+				"title": "Extract Installed Bundles",
+				"readOnlyHint": true,
+				"idempotentHint": true,
+				"openWorldHint": false
+			}
+		}
+	]
+}
