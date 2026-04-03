@@ -1,0 +1,20 @@
+<tool scriptid="customtool_pillar3_extractor">
+  <name>Pillar 3 UI and Forms Tools</name>
+  <scriptfile>[/SuiteScripts/customtool_pillar3_extractor.js]</scriptfile>
+  <rpcschema>[/SuiteScripts/pillar3_schema_acp.json]</rpcschema>
+  <exposeto3rdpartyagents>T</exposeto3rdpartyagents>
+  <permissions>
+    <permission>
+      <permkey>ADMI_CUSTFORM</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+    <permission>
+      <permkey>ADMI_CUSTFIELD</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+    <permission>
+      <permkey>ADMI_SYSTEMNOTE</permkey>
+      <permlevel>VIEW</permlevel>
+    </permission>
+  </permissions>
+</tool>
