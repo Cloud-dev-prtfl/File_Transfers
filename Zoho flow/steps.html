@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoho Flow: Automated Data Enrichment</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .flow-card {
+            @apply bg-white p-5 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-100 flex flex-col items-center text-center w-full max-w-[280px] z-10 relative transition-transform duration-300 hover:-translate-y-1;
+        }
+        .icon-box {
+            @apply w-12 h-12 rounded-xl flex items-center justify-center mb-3 shadow-inner;
+        }
+        .connector {
+            @apply flex flex-col items-center justify-center py-2;
+        }
+        .connector-line {
+            @apply w-0.5 h-8 bg-slate-300;
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.8s ease-out forwards;
+            opacity: 0;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans text-slate-800 min-h-screen py-12 px-4">
+
+    <!-- Header section -->
+    <div class="max-w-3xl mx-auto text-center mb-12 animate-fade-in" style="animation-delay: 0.1s;">
+        <h1 class="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">Zoho Flow Data Enrichment</h1>
+        <p class="text-slate-500 text-lg">Automated pipeline using ChatGPT & Lusha to enrich missing CRM records.</p>
+    </div>
+
+    <!-- Flowchart Container -->
+    <div class="max-w-4xl mx-auto flex flex-col items-center">
+
+        <!-- Step 1: Trigger -->
+        <div class="flow-card animate-fade-in" style="animation-delay: 0.2s;">
+            <div class="icon-box bg-blue-100 text-blue-600">
+                <i data-lucide="database"></i>
+            </div>
+            <h3 class="font-bold text-slate-800 mb-1">1. Zoho CRM Trigger</h3>
+            <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">Module Entry Updated</p>
+            <p class="text-sm text-slate-600 mt-2">Fires when <code class="bg-blue-50 text-blue-700 px-1 rounded">Trigger Enrichment</code> checkbox is marked as True.</p>
+        </div>
+
+        <div class="connector animate-fade-in" style="animation-delay: 0.3s;">
+            <div class="connector-line"></div>
+            <i data-lucide="chevron-down" class="text-slate-400 -mt-2"></i>
+        </div>
+
+        <!-- Step 2: OpenAI -->
+        <div class="flow-card animate-fade-in" style="animation-delay: 0.4s;">
+            <div class="icon-box bg-purple-100 text-purple-600">
+                <i data-lucide="bot"></i>
+            </div>
+            <h3 class="font-bold text-slate-800 mb-1">2. AI Research (ChatGPT)</h3>
+            <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">OpenAI App</p>
+            <p class="text-sm text-slate-600 mt-2">Passes Company & Name to GPT-4o-mini to scour for generic Website, Phone, and LinkedIn data.</p>
+        </div>
+
+        <div class="connector animate-fade-in" style="animation-delay: 0.5s;">
+            <div class="connector-line"></div>
+            <i data-lucide="chevron-down" class="text-slate-400 -mt-2"></i>
+        </div>
+
+        <!-- Step 3: Custom Function -->
+        <div class="flow-card animate-fade-in" style="animation-delay: 0.6s;">
+            <div class="icon-box bg-slate-200 text-slate-700">
+                <i data-lucide="code-2"></i>
+            </div>
+            <h3 class="font-bold text-slate-800 mb-1">3. Parse AI Response</h3>
+            <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">Custom Function</p>
+            <p class="text-sm text-slate-600 mt-2">Deluge script converts OpenAI's stringified JSON output into usable Flow variables.</p>
+        </div>
+
+        <div class="connector animate-fade-in" style="animation-delay: 0.7s;">
+            <div class="connector-line"></div>
+            <i data-lucide="chevron-down" class="text-slate-400 -mt-2"></i>
+        </div>
+
+        <!-- Step 4: Decision -->
+        <div class="flow-card !border-orange-200 !shadow-[0_0_20px_rgba(251,146,60,0.15)] animate-fade-in" style="animation-delay: 0.8s;">
+            <div class="icon-box bg-orange-100 text-orange-600">
+                <i data-lucide="git-branch"></i>
+            </div>
+            <h3 class="font-bold text-slate-800 mb-1">4. Is Data Still Missing?</h3>
+            <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">Logic: Decision</p>
+            <p class="text-sm text-slate-600 mt-2">Checks if critical fields (e.g., Phone/Email) are still empty after the ChatGPT step.</p>
+        </div>
+
+        <!-- Branching Lines connecting to next row -->
+        <div class="w-full max-w-2xl relative mt-4 hidden md:block animate-fade-in" style="animation-delay: 0.9s;">
+            <!-- Horizontal bridge line -->
+            <div class="absolute top-0 left-1/4 right-1/4 h-0.5 bg-slate-300"></div>
+            <!-- Left drop line -->
+            <div class="absolute top-0 left-1/4 w-0.5 h-8 bg-slate-300 -translate-x-1/2"></div>
+            <!-- Right drop line -->
+            <div class="absolute top-0 right-1/4 w-0.5 h-8 bg-slate-300 translate-x-1/2"></div>
+        </div>
+
+        <!-- Branching Containers -->
+        <div class="flex flex-col md:flex-row w-full max-w-4xl justify-center gap-8 md:gap-16 mt-6 md:mt-8 relative z-10">
+            
+            <!-- Path A: Yes (Still Missing) -> Use Lusha -->
+            <div class="flex flex-col items-center flex-1 animate-fade-in" style="animation-delay: 1.0s;">
+                <span class="bg-red-100 text-red-700 text-xs font-bold px-4 py-1.5 rounded-full mb-6 shadow-sm border border-red-200 flex items-center gap-2">
+                    <i data-lucide="alert-circle" class="w-4 h-4"></i> YES (Still Missing)
+                </span>
+                
+                <div class="flow-card">
+                    <div class="icon-box bg-rose-100 text-rose-600">
+                        <i data-lucide="search"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-800 mb-1">5a. Lusha API Fallback</h3>
+                    <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">Send HTTP Request</p>
+                    <p class="text-sm text-slate-600 mt-2">Sends a GET request to Lusha's Person API using CRM variables to find verified contact data.</p>
+                </div>
+
+                <div class="connector">
+                    <div class="connector-line"></div>
+                    <i data-lucide="chevron-down" class="text-slate-400 -mt-2"></i>
+                </div>
+
+                <div class="flow-card !border-green-200">
+                    <div class="icon-box bg-green-100 text-green-600">
+                        <i data-lucide="check-circle-2"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-800 mb-1">6a. Update Zoho CRM</h3>
+                    <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">Module Entry Update</p>
+                    <p class="text-sm text-slate-600 mt-2">Saves Lusha's verified Email/Phone. Sets <code class="bg-slate-100 px-1 rounded text-xs">Trigger Enrichment</code> to false.</p>
+                </div>
+            </div>
+
+            <!-- Path B: No (Data Found) -> Skip Lusha -->
+            <div class="flex flex-col items-center flex-1 animate-fade-in md:mt-0 mt-8" style="animation-delay: 1.1s;">
+                <span class="bg-emerald-100 text-emerald-700 text-xs font-bold px-4 py-1.5 rounded-full mb-6 shadow-sm border border-emerald-200 flex items-center gap-2">
+                    <i data-lucide="check" class="w-4 h-4"></i> NO (Data Found)
+                </span>
+                
+                <div class="flow-card !border-green-200">
+                    <div class="icon-box bg-green-100 text-green-600">
+                        <i data-lucide="check-circle-2"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-800 mb-1">5b. Update Zoho CRM</h3>
+                    <p class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">Module Entry Update</p>
+                    <p class="text-sm text-slate-600 mt-2">Saves the AI's retrieved Website/Phone. Sets <code class="bg-slate-100 px-1 rounded text-xs">Trigger Enrichment</code> to false.</p>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Initialize Lucide Icons -->
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
