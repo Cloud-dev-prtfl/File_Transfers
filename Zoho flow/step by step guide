@@ -1,0 +1,91 @@
+Here is the step-by-step configuration to build this automated enrichment pipeline entirely within Zoho Flow. 
+
+Since Lusha does not have a native, drag-and-drop connector in Zoho Flow, we will use the native **OpenAI** app for the initial AI research and Zoho Flow’s **Send HTTP Request** action to connect to the Lusha API.
+
+### Prerequisites
+1. **OpenAI API Key**: For the ChatGPT agent.
+2. **Lusha API Key**: Available in your Lusha account under API settings.
+3. **Trigger Mechanism**: To prevent infinite loops in Zoho CRM, create a custom checkbox in your target module (e.g., Leads or Contacts) named `Trigger Enrichment`. 
+
+---
+
+### Step 1: Set Up the Trigger
+1. In Zoho Flow, create a new flow. Name it something like "CRM Data Enrichment".
+2. Select **App** as the trigger.
+3. Choose **Zoho CRM** -> **Updated Module Entry** (or Created, depending on your business logic).
+4. Select your module (e.g., Contacts).
+5. Set a trigger condition to prevent runaway API calls: 
+   * `Trigger Enrichment` **equals** `true`.
+
+### Step 2: The AI Agent Research (ChatGPT)
+Zia cannot be natively prompted for open-web research inside Zoho Flow in this manner, so OpenAI is the optimal tool here.
+
+1. Under Apps, drag and drop **OpenAI**.
+2. Select the **Create Chat Completion** action and authorize your OpenAI connection.
+3. Configure the action:
+   * **Model**: `gpt-4o-mini` or `gpt-4o` (depending on your speed/cost preference).
+   * **Messages**: 
+     * *Role*: `system` -> *Content*: "You are an expert data researcher. I will provide a company name and a contact name. Return their likely corporate website, generic phone number, and LinkedIn URL. You must return ONLY a raw JSON object with keys: `website`, `phone`, `linkedin`. If you cannot find the data, return empty strings."
+     * *Role*: `user` -> *Content*: Pass the dynamic variables from the Zoho CRM trigger (e.g., `${trigger.Company}` and `${trigger.First_Name} ${trigger.Last_Name}`).
+
+### Step 3: Parse the AI Response (Custom Function)
+Because ChatGPT returns a stringified JSON, you need to parse it to use the individual fields in Zoho Flow's logic.
+
+1. Go to **Logic** -> **Custom Function** -> **Create**.
+2. Name it `ParseOpenAIResponse`.
+3. Add an input parameter named `jsonString` (String).
+4. Use this Deluge snippet:
+   ```javascript
+   string ParseOpenAIResponse(string jsonString)
+   {
+       try {
+           responseMap = jsonString.toMap();
+           return responseMap;
+       } catch (e) {
+           return {"website":"", "phone":"", "linkedin":""};
+       }
+   }
+   ```
+5. Map the output of the OpenAI step (`${openai.message.content}`) to this custom function.
+
+### Step 4: Decision Logic (Condition Check)
+Now, check if the AI successfully found the critical missing data (e.g., Phone or Email).
+
+1. Drag and drop **Logic** -> **Decision**.
+2. Name the condition "Is Data Still Missing?".
+3. Set the condition: 
+   * If `${ParseOpenAIResponse.phone}` **is empty** OR `${trigger.Email}` **is empty**.
+4. The flow will now split into two branches: **Yes** (Still missing) and **Default** (Data found).
+
+### Step 5: The Lusha Fallback (HTTP Request)
+On the **Yes** branch (data is still missing), configure the call to Lusha.
+
+1. Under Apps, select **Webhooks & HTTP** -> **Send HTTP Request**.
+2. Configure the HTTP Request for the Lusha Person API:
+   * **URL**: `https://api.lusha.com/person`
+   * **Method**: `GET`
+   * **Headers**: 
+     * `api_key` : `[Your_Lusha_API_Key]`
+   * **URL Parameters**: Map the known CRM variables to Lusha's required parameters (e.g., `firstName` = `${trigger.First_Name}`, `lastName` = `${trigger.Last_Name}`, `company` = `${trigger.Company}`).
+3. The HTTP Request will output a JSON response containing Lusha's enriched data (emails, phone numbers).
+
+### Step 6: Update Zoho CRM
+You must update the CRM record in both branches to ensure the loop is closed and the trigger checkbox is unchecked.
+
+**On the "Default" Branch (ChatGPT found the data):**
+1. Drag **Zoho CRM** -> **Update Module Entry**.
+2. **Module**: Contacts.
+3. **Record ID**: `${trigger.Contact_ID}`
+4. Map the fields to the outputs from Step 3 (the Custom Function):
+   * Website: `${ParseOpenAIResponse.website}`
+   * Phone: `${ParseOpenAIResponse.phone}`
+5. Set `Trigger Enrichment` to `false`.
+
+**On the "Yes" Branch (Lusha provided the data):**
+1. Drag **Zoho CRM** -> **Update Module Entry**.
+2. **Module**: Contacts.
+3. **Record ID**: `${trigger.Contact_ID}`
+4. Map the fields using the JSON payload returned by the HTTP Request (Lusha's response):
+   * Phone: `${invoke_url.response.data.phoneNumbers[0].e164}` *(Note: Adjust this payload path based on the exact Lusha API version you are calling).*
+   * Email: `${invoke_url.response.data.emailAddresses[0].email}`
+5. Set `Trigger Enrichment` to `false`.
