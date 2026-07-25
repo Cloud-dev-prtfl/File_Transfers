@@ -1,1 +1,25 @@
 
+1. Complete Sales cycle Agentica RAG application
+2. Cluade Code - AI NetSuite Audit 
+3. Claude Code - AI Celigo Audit 
+4. Cladue Code - AI NetSuite Documentation project
+5. AI HR Exam Application Description: Architected a multi-agent AI system using Django, integrating complex enterprise user management and SSO capabilities to automate human resources testing and reporting.
+
+1. Enterprise AI Policy Chatbot Description: Developed a conversational agent using the Next.js framework and OpenAI SDK to streamline internal policy inquiries.
+
+1. Linked-in Profile Assistance BOT Description: This application is a LinkedIn Personal Info Bot built with React (frontend) and FastAPI (backend). The backend loads a local portfolio JSON file and uses Gemini with a strict system prompt so responses are grounded only in that JSON data. The frontend provides a chat interface and sends user messages to a single /chat endpoint. Infrastructure is provisioned using Terraform to build/push Docker images and deploy the backend on Google Cloud Run.
+
+1. Creative Marketplace E-commerce Platform v2.0 Client: A. Centauri Software Technologies: Python, FastAPI Description: Backend development for a multi-vendor digital marketplace connecting independent creators with global buyers.
+
+1. Restaurant Online Web Application v1.0 Client: A. Centauri Software Technologies: Next.js, Django, Python Description: Full-stack development of a highly scalable restaurant management platform unifying online food ordering (pickup/delivery) and real-time table reservations.
+
+1. Creative Delivery Web Application Platform v1.0 Client: A. Centauri Software Technologies: React, Django, Python Description: Full-stack development of a highly scalable, real-time courier service platform connecting users with independent contractors for multi-tiered delivery solutions.
+
+1. Rent Property Listing Web Application v1.0 Client: A. Centauri Software Technologies: Web Application, Database Optimization, Payment Integrations Description: Developed a high-volume property rental marketplace featuring a credit-based lead generation and consumption model for property listers.
+
+1. Home Electronics Appliances Listing Platform v1.0 Client: A. Centauri Software Technologies: Web Application, Cloud Native, Microservices Description: Developed a secure rental marketplace facilitating short and long-term home appliance rentals using a dual fee structure (subscription vs. credit listing).
+
+1. Shopping Bags E-commerce Platform Technologies: Next.js, Django, PostgreSQL, Stripe API Description: Developed a dedicated B2B and B2C e-commerce platform for customizable shopping bags, featuring bulk ordering and real-time inventory management.
+
+1. StudyChat App Technologies: Python, FastAPI, React, Gemini API, WebSockets Description: Created an AI-powered educational chat application enabling students to collaborate and learn through interactive, generative AI-assisted study sessions.
+https://www.youtube.com/watch?v=PtQiiknWUcI
