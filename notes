@@ -1,6 +1,5 @@
 
-https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=http://localhost:50357/callback&scope=org:create_api_key+user:profile+user:inference+user:sessions:claude_code+user:mcp_servers+user:file_upload&code_challenge=T3727VAmKUYG2LTnirVB_fEOs979KUwIX4Io9GBpTgc&code_challenge_method=S256&state=VINVJVmhKES1hEqyQjdbaSQisPcpKa55jVX_jLWN6i0
-
+https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3Amcp_servers+user%3Afile_upload&code_challenge=iX_P4piXdzYxnK_jYH4I20ESyPpnnYQKGoONYh5Yyrg&code_challenge_method=S256&state=qJFpjCSRJP4oHEMdqY4pZagbT6822bfjB08y3zfg7lo
 
 
 # PASSWORD = 'vuwrab-rogny4-tipBed'
